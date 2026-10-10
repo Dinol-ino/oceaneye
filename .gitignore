@@ -1,0 +1,190 @@
+# ==============================================================================
+# OceanEye - .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Environment Variables & Secrets (CRITICAL: Never commit keys or secrets)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.template
+*.env
+*.secrets
+secrets/
+credentials.json
+client_secret*.json
+
+# ------------------------------------------------------------------------------
+# 2. Cryptographic Keys, Certificates & VAPID Credentials
+# ------------------------------------------------------------------------------
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+certs/
+data/certs/
+data/vapid_private.pem
+id_rsa*
+*.keystore
+
+# ------------------------------------------------------------------------------
+# 3. Databases, Runtime Data & Storage
+# ------------------------------------------------------------------------------
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+evidence/
+uploads/
+
+# ------------------------------------------------------------------------------
+# 4. Computer Vision Models & Weights (Heavy binary files)
+# ------------------------------------------------------------------------------
+models/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.torchscript
+*.tflite
+*.safetensors
+*.weights
+*.bin
+*.h5
+*.ckpt
+
+# ------------------------------------------------------------------------------
+# 5. Video Footage & Media Assets
+# ------------------------------------------------------------------------------
+videos/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.m4v
+
+# ------------------------------------------------------------------------------
+# 6. Runtime Outputs, Jobs & Worker Logs
+# ------------------------------------------------------------------------------
+outputs/
+output/
+runs/
+jobs/
+logs/
+*.log
+*.log.*
+
+# ------------------------------------------------------------------------------
+# 7. AI Assistant Outputs & Scratch Dumps
+# ------------------------------------------------------------------------------
+Claude outputs/
+"Claude outputs"/
+.claude/
+.gemini/
+.cursor/
+scratch/
+
+# ------------------------------------------------------------------------------
+# 8. Python & Virtual Environments
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.whl
+*.zip
+*.tar.gz
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ------------------------------------------------------------------------------
+# 9. Testing & Code Quality Caches
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+*.pytype
+
+# ------------------------------------------------------------------------------
+# 10. Jupyter / Colab Checkpoints
+# ------------------------------------------------------------------------------
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# ------------------------------------------------------------------------------
+# 11. IDE & Editor Configs
+# ------------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ------------------------------------------------------------------------------
+# 12. Operating System Files
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# ------------------------------------------------------------------------------
+# 13. Frontend / Node (if applicable)
+# ------------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

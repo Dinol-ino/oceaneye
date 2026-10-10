@@ -1,0 +1,4540 @@
+{
+ "info": {
+  "_postman_id": "oceaneye-api-collection",
+  "name": "OceanEye API",
+  "description": "Complete manual-test suite for the OceanEye drowning-risk detection prototype.\n\n**Nothing is hardcoded.** Every id (beach, camera, upload, job, event, alert) is captured from an earlier response into a collection variable. Run the folders in order the first time; after that any folder works on its own as long as `00 · Health` has run.\n\n**Authentication** is development mode: an `X-Dev-Role` header of `operator`, `lifeguard`, `administrator` or `service`. That is not security — it exists so the role boundaries can be built and tested before a real identity provider is wired in. The server refuses to start in production with this mode on.\n\nSet `base_url` in the environment. Full walkthrough: `docs/testing.md`.",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "00 · Health & configuration",
+   "item": [
+    {
+     "name": "Liveness — GET /health",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{base_url}}/health",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "health"
+       ]
+      },
+      "description": "Is the process up? Checks nothing else. Needs no authentication."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"status ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Readiness — GET /ready",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{base_url}}/ready",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "ready"
+       ]
+      },
+      "description": "Are the database and evidence storage reachable? 503 when not."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 when ready\", () => pm.response.to.have.status(200));",
+         "const b = pm.response.json();",
+         "pm.test(\"every dependency healthy\", () => {",
+         "    pm.expect(b.status).to.eql(\"ready\");",
+         "    Object.entries(b.checks).forEach(([name, ok]) => pm.expect(ok, name).to.be.true);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Public config — GET /api/config/public",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/config/public",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "config",
+        "public"
+       ]
+      },
+      "description": "Everything the web interfaces need, and the single best request to run first: it tells you the deployment beach, what this machine can do, and which capabilities are ON. Captures beach_id / lat / lon so nothing downstream is hardcoded."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const c = pm.response.json();",
+         "",
+         "pm.test(\"a deployment beach exists\", () => pm.expect(c.beach).to.not.be.null);",
+         "pm.collectionVariables.set(\"beach_id\", c.beach.id);",
+         "pm.collectionVariables.set(\"beach_lat\", c.beach.lat);",
+         "pm.collectionVariables.set(\"beach_lon\", c.beach.lon);",
+         "pm.collectionVariables.set(\"beach_region\", c.beach.region);",
+         "",
+         "pm.test(\"capabilities are reported honestly\", () => {",
+         "    pm.expect(c.capabilities).to.have.keys(",
+         "        [\"secure_context\", \"web_push\", \"weather\", \"place_search\", \"map_tiles\"]);",
+         "});",
+         "pm.test(\"hardware was measured\", () => pm.expect(c.hardware.cpu_count).to.be.above(0));",
+         "",
+         "console.log(\"Beach:      \" + c.beach.label);",
+         "console.log(\"Machine:    \" + (c.hardware.gpu || c.hardware.cpu_count + \" CPU cores\") +",
+         "            \"  ->  \" + c.max_workers + \" worker slot(s)\");",
+         "console.log(\"Worker:     \" + JSON.stringify(c.worker));",
+         "console.log(\"HTTPS:      \" + c.capabilities.secure_context +",
+         "            \"   background push: \" + c.capabilities.web_push);",
+         "console.log(\"Map tiles:  \" + c.map.tile_url);",
+         "const cfgBody = pm.response.json();",
+         "pm.collectionVariables.set(\"map_tile_url\", (cfgBody.map || {}).tile_url || \"\");",
+         "pm.test(\"capabilities say whether place search and tiles are configured\", () => {",
+         "    pm.expect(cfgBody.capabilities).to.have.property(\"place_search\");",
+         "    pm.expect(cfgBody.capabilities).to.have.property(\"map_tiles\");",
+         "});",
+         "pm.test(\"the deployment beach's position is stated, not implied\", () => {",
+         "    if (cfgBody.beach) {",
+         "        pm.expect(cfgBody.beach.lat).to.be.a(\"number\");",
+         "        pm.expect(cfgBody.beach.lon).to.be.a(\"number\");",
+         "    }",
+         "});",
+         "pm.test(\"no secret is exposed in the public config\", () => {",
+         "    const raw = pm.response.text();",
+         "    pm.expect(raw).to.not.include(\"apiKey\");",
+         "    pm.expect(raw).to.not.include(\"vapid_private\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "No role header is rejected — 401",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{api}}/config/public",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "config",
+        "public"
+       ]
+      },
+      "description": "Every protected route needs an identity. This proves the boundary is on."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"401 without a role\", () => pm.response.to.have.status(401));",
+         "pm.test(\"error is structured, not a stack trace\", () => {",
+         "    pm.expect(pm.response.json().error.code).to.eql(\"authentication_required\");",
+         "    pm.expect(pm.response.text()).to.not.include(\"Traceback\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Map tiles come from this app, not the provider — GET /api/map/tiles",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/map/tiles/osm-bright-smooth/12/2930/1800.png",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "map",
+        "tiles",
+        "osm-bright-smooth",
+        "12",
+        "2930",
+        "1800.png"
+       ]
+      },
+      "description": "Tiles are proxied so the Geoapify key stays on the server and never reaches a browser. A tile that cannot be fetched comes back as a blank PNG rather than an error: a map with gaps is usable, a map that throws is not."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"is a PNG\", () => pm.expect(pm.response.headers.get(\"content-type\")).to.include(\"image/png\"));",
+         "pm.test(\"the tile URL in the public config is local and key-free\", () => {",
+         "    const m = pm.collectionVariables.get(\"map_tile_url\") || \"\";",
+         "    pm.expect(m).to.include(\"/map/tiles/\");",
+         "    pm.expect(m).to.not.include(\"apiKey\");",
+         "    pm.expect(m).to.not.include(\"geoapify.com\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Tiles need authentication — 401",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{api}}/map/tiles/osm-bright-smooth/12/2930/1800.png",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "map",
+        "tiles",
+        "osm-bright-smooth",
+        "12",
+        "2930",
+        "1800.png"
+       ]
+      },
+      "description": "Without a role header the proxy refuses: it is an authenticated resource, not an open relay to the tile provider on this installation's account."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"401\", () => pm.response.to.have.status(401));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A path-traversal tile style is rejected",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/map/tiles/..%2Fsecret/12/1/1.png",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "map",
+        "tiles",
+        "..%2Fsecret",
+        "12",
+        "1",
+        "1.png"
+       ]
+      },
+      "description": "The style name is pattern-checked before it is put into a provider URL."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"404 or 422, never 200\", () => pm.expect(pm.response.code).to.be.oneOf([404, 422]));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Start here. The public-config request captures the beach id every later request reuses."
+  },
+  {
+   "name": "01 · Beach (deployment site)",
+   "item": [
+    {
+     "name": "Search for a place — GET /api/places/search",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/places/search?q={{place_query}}&lat={{beach_lat}}&lon={{beach_lon}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "places",
+        "search"
+       ],
+       "query": [
+        {
+         "key": "q",
+         "value": "{{place_query}}"
+        },
+        {
+         "key": "lat",
+         "value": "{{beach_lat}}"
+        },
+        {
+         "key": "lon",
+         "value": "{{beach_lon}}"
+        }
+       ]
+      },
+      "description": "Free-text place search through Geoapify: a beach, a town or a district. Always 200 - when the lookup is unavailable the list is empty and 'error' says why, which is what lets the picker tell the operator to type the beach in instead of showing a bare 'no results'. Captures the first hit so nothing below is hardcoded."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const body = pm.response.json();",
+         "pm.test(\"shape: query, results, available, error\", () => {",
+         "    pm.expect(body).to.have.property(\"query\");",
+         "    pm.expect(body.results).to.be.an(\"array\");",
+         "    pm.expect(body.available).to.be.a(\"boolean\");",
+         "});",
+         "pm.test(\"an empty result always carries a reason\", () =>",
+         "    pm.expect(body.results.length > 0 || Boolean(body.error)).to.be.true);",
+         "pm.test(\"the API key never appears in a response\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"apiKey\"));",
+         "if (body.results.length) {",
+         "    const p = body.results[0];",
+         "    pm.test(\"a result carries a full address, not just a name\", () => {",
+         "        pm.expect(p.name).to.be.a(\"string\").and.not.empty;",
+         "        pm.expect(p.address).to.be.a(\"string\").and.not.empty;",
+         "        pm.expect(p.lat).to.be.within(-90, 90);",
+         "        pm.expect(p.lon).to.be.within(-180, 180);",
+         "    });",
+         "    pm.collectionVariables.set(\"found_beach_name\", p.name);",
+         "    pm.collectionVariables.set(\"found_beach_address\", p.address);",
+         "    pm.collectionVariables.set(\"found_beach_lat\", p.lat);",
+         "    pm.collectionVariables.set(\"found_beach_lon\", p.lon);",
+         "    pm.collectionVariables.set(\"found_beach_source\", p.source_id || \"\");",
+         "    console.log(\"Found: \" + p.name + \" — \" + p.address);",
+         "} else {",
+         "    console.log(\"Place search unavailable (\" + body.error + \"). \" +",
+         "                \"The create request below uses a typed-in beach instead.\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Beaches near a point — GET /api/places/beaches-near",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/places/beaches-near?lat={{beach_lat}}&lon={{beach_lon}}&radius_km=25",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "places",
+        "beaches-near"
+       ],
+       "query": [
+        {
+         "key": "lat",
+         "value": "{{beach_lat}}"
+        },
+        {
+         "key": "lon",
+         "value": "{{beach_lon}}"
+        },
+        {
+         "key": "radius_km",
+         "value": "25"
+        }
+       ]
+      },
+      "description": "The 'beaches near the map centre' shortcut in the picker. Same response shape as the search, so one renderer handles both."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const body = pm.response.json();",
+         "pm.test(\"same shape as /places/search\", () => {",
+         "    pm.expect(body.results).to.be.an(\"array\");",
+         "    pm.expect(body.available).to.be.a(\"boolean\");",
+         "});",
+         "pm.test(\"results are sorted nearest first\", () => {",
+         "    const d = body.results.map(r => r.distance_km).filter(x => x != null);",
+         "    pm.expect(d).to.deep.equal(d.slice().sort((a, b) => a - b));",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A one-character query is rejected — 422",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/places/search?q=a",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "places",
+        "search"
+       ],
+       "query": [
+        {
+         "key": "q",
+         "value": "a"
+        }
+       ]
+      },
+      "description": "Two characters minimum: a single letter would send a useless request to the provider on every keystroke."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A search with no query is rejected — 422",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/places/search",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "places",
+        "search"
+       ]
+      },
+      "description": "'q' is required; there is no 'everything' search."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "An impossible radius is rejected — 422",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/places/beaches-near?lat={{beach_lat}}&lon={{beach_lon}}&radius_km=500",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "places",
+        "beaches-near"
+       ],
+       "query": [
+        {
+         "key": "lat",
+         "value": "{{beach_lat}}"
+        },
+        {
+         "key": "lon",
+         "value": "{{beach_lon}}"
+        },
+        {
+         "key": "radius_km",
+         "value": "500"
+        }
+       ]
+      },
+      "description": "The provider caps the circle; the API refuses rather than silently searching somewhere else."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List configured sites — GET /api/beaches",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches"
+       ]
+      },
+      "description": "Configured deployment sites, the active one first, each with its camera count."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const sites = pm.response.json();",
+         "pm.test(\"exactly one site is active\", () =>",
+         "    pm.expect(sites.filter(s => s.is_active).length).to.eql(1));",
+         "pm.test(\"the active site is listed first\", () => pm.expect(sites[0].is_active).to.be.true);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Active site — GET /api/beaches/active",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/active",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "active"
+       ]
+      },
+      "description": "The one beach this installation watches. This is the field reality: one beach, one authority, one set of lifeguards."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const b = pm.response.json();",
+         "pm.test(\"it is active\", () => pm.expect(b.is_active).to.be.true);",
+         "pm.test(\"it matches public config\", () =>",
+         "    pm.expect(b.id).to.eql(pm.collectionVariables.get(\"beach_id\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Add a second site — POST /api/beaches",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches"
+       ]
+      },
+      "description": "Uses a beach found by the search above when there was one, otherwise a typed-in beach near the current site - which is exactly what the picker does when the lookup is unavailable. Nothing is hardcoded either way. 'activate' is false so the deployment does not change yet.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"{{new_beach_name}}\",\n  \"region\": \"{{found_beach_address}}\",\n  \"lat\": \"{{new_beach_lat}}\",\n  \"lon\": \"{{new_beach_lon}}\",\n  \"authority_name\": \"Postman test authority\",\n  \"lifeguard_count\": 2,\n  \"activate\": false\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "// 'region' now carries the provider's full address when there was a search hit.",
+         "// Prefer a beach the map lookup actually returned; fall back to a typed-in one so this request",
+         "// works offline too.",
+         "const found = pm.collectionVariables.get(\"found_beach_name\");",
+         "if (found) {",
+         "    pm.collectionVariables.set(\"new_beach_name\", found);",
+         "    pm.collectionVariables.set(\"new_beach_lat\", pm.collectionVariables.get(\"found_beach_lat\"));",
+         "    pm.collectionVariables.set(\"new_beach_lon\", pm.collectionVariables.get(\"found_beach_lon\"));",
+         "    pm.collectionVariables.set(\"new_beach_source\", pm.collectionVariables.get(\"found_beach_source\"));",
+         "} else {",
+         "    pm.collectionVariables.set(\"new_beach_name\", \"Test Beach \" + Date.now());",
+         "    pm.collectionVariables.set(\"new_beach_lat\",",
+         "        (Number(pm.collectionVariables.get(\"beach_lat\")) + 0.05).toFixed(4));",
+         "    pm.collectionVariables.set(\"new_beach_lon\",",
+         "        (Number(pm.collectionVariables.get(\"beach_lon\")) + 0.05).toFixed(4));",
+         "    pm.collectionVariables.set(\"new_beach_source\", \"\");",
+         "}"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "const b = pm.response.json();",
+         "pm.collectionVariables.set(\"second_beach_id\", b.id);",
+         "pm.test(\"adding a site does NOT steal the deployment\", () => pm.expect(b.is_active).to.be.false);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Edit authority details — PATCH /api/beaches/{id}",
+     "request": {
+      "method": "PATCH",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}"
+       ]
+      },
+      "description": "Only the details an authority maintains are editable. Name and position are not: a beach that moved is a different site.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"authority_name\": \"Coastal Authority (edited)\",\n  \"authority_phone\": \"+91 824 000000\",\n  \"lifeguard_count\": 5,\n  \"notes\": \"Edited from Postman\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const b = pm.response.json();",
+         "pm.test(\"the edit stuck\", () => {",
+         "    pm.expect(b.authority_name).to.eql(\"Coastal Authority (edited)\");",
+         "    pm.expect(b.lifeguard_count).to.eql(5);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Position is not editable — 422",
+     "request": {
+      "method": "PATCH",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"lat\": 1.0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 — lat is not part of the update schema\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Negative lifeguard count — 422",
+     "request": {
+      "method": "PATCH",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"lifeguard_count\": -1\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 for a negative count\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Operator cannot switch deployment — 403",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}/activate",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}",
+        "activate"
+       ]
+      },
+      "description": "Changing which beach the installation watches redefines the deployment, so it is administrator-only."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403 for an operator\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Lifeguard cannot switch deployment — 403",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}/activate",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}",
+        "activate"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403 for a lifeguard\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Administrator switches deployment — POST /activate",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{second_beach_id}}/activate",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{second_beach_id}}",
+        "activate"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"the new site is active\", () => pm.expect(pm.response.json().is_active).to.be.true);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Only one site is ever active",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches"
+       ]
+      },
+      "description": "The invariant the whole deployment model rests on."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const sites = pm.response.json();",
+         "pm.test(\"exactly one active site after switching\", () =>",
+         "    pm.expect(sites.filter(s => s.is_active).length).to.eql(1));",
+         "pm.test(\"it is the one just activated\", () =>",
+         "    pm.expect(sites.find(s => s.is_active).id)",
+         "      .to.eql(pm.collectionVariables.get(\"second_beach_id\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Switch back to the original site",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/{{beach_id}}/activate",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "{{beach_id}}",
+        "activate"
+       ]
+      },
+      "description": "Leaves the installation as it was found. Run this before the camera folder."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"original site active again\", () =>",
+         "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get(\"beach_id\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Unknown beach — 404",
+     "request": {
+      "method": "PATCH",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/beaches/bch_doesnotexist",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "beaches",
+        "bch_doesnotexist"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"notes\": \"x\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"404 for an unknown beach\", () => pm.response.to.have.status(404));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "The deployment-site model: search the map, configure a site, choose the active one. Run in order — the last request restores the original site."
+  },
+  {
+   "name": "02 · Cameras & danger zones",
+   "item": [
+    {
+     "name": "Register a camera — POST /api/cameras",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      },
+      "description": "An RTSP camera. With no beach_id it joins the active deployment automatically, which is what an operator adding a camera always means.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"{{camera_name}}\",\n  \"lat\": \"{{beach_lat}}\",\n  \"lon\": \"{{beach_lon}}\",\n  \"stream_url\": \"rtsp://192.168.1.20:8080/live\",\n  \"source_type\": \"rtsp\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.collectionVariables.set(\"camera_name\", \"Postman camera \" + Date.now());"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "const c = pm.response.json();",
+         "pm.collectionVariables.set(\"camera_id\", c.id);",
+         "pm.test(\"it joined the active beach\", () =>",
+         "    pm.expect(c.beach_id).to.eql(pm.collectionVariables.get(\"beach_id\")));",
+         "pm.test(\"SECURITY: stream_url is never returned\", () => {",
+         "    pm.expect(c).to.not.have.property(\"stream_url\");",
+         "    pm.expect(pm.response.text()).to.not.include(\"rtsp://\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List cameras — GET /api/cameras",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const list = pm.response.json();",
+         "pm.test(\"the new camera is listed\", () =>",
+         "    pm.expect(list.map(c => c.id)).to.include(pm.collectionVariables.get(\"camera_id\")));",
+         "pm.test(\"SECURITY: no stream URL leaks in a listing\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"rtsp://\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List one beach's cameras — GET /api/cameras?beach_id",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras?beach_id={{beach_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ],
+       "query": [
+        {
+         "key": "beach_id",
+         "value": "{{beach_id}}"
+        }
+       ]
+      },
+      "description": "Scoping: this is what the Control Room uses, so it only ever shows its own beach."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const list = pm.response.json();",
+         "pm.test(\"every camera belongs to that beach\", () =>",
+         "    list.forEach(c => pm.expect(c.beach_id).to.eql(pm.collectionVariables.get(\"beach_id\"))));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Cameras of an unknown beach is empty, not an error",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras?beach_id=bch_nothinghere",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ],
+       "query": [
+        {
+         "key": "beach_id",
+         "value": "bch_nothinghere"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 with an empty list\", () => {",
+         "    pm.response.to.have.status(200);",
+         "    pm.expect(pm.response.json()).to.eql([]);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Camera on an unknown beach — 404",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      },
+      "description": "A camera is never created pointing at a beach that does not exist.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"orphan\",\n  \"lat\": 1,\n  \"lon\": 1,\n  \"stream_url\": \"rtsp://h/x\",\n  \"beach_id\": \"bch_nothinghere\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"404\", () => pm.response.to.have.status(404));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "SECURITY: a file:// stream URL is refused — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      },
+      "description": "Clients may never make the server read a local path. The submitted value is also not echoed back, so an error page cannot be used to confirm a path exists.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"bad\",\n  \"lat\": 1,\n  \"lon\": 1,\n  \"stream_url\": \"file:///etc/passwd\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));",
+         "pm.test(\"the submitted value is not echoed\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"/etc/passwd\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Both stream_url and video_upload_id — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"ambiguous\",\n  \"lat\": 1,\n  \"lon\": 1,\n  \"stream_url\": \"rtsp://h/x\",\n  \"video_upload_id\": \"vid_whatever\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 — exactly one source is allowed\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Lifeguard cannot create a camera — 403",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"nope\",\n  \"lat\": 1,\n  \"lon\": 1,\n  \"stream_url\": \"rtsp://h/x\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Set the danger zone — PUT /api/zones/{camera_id}",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/{{camera_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "{{camera_id}}"
+       ]
+      },
+      "description": "The polygon the Control Room's zone editor writes. Coordinates are normalised 0–1 so they hold at any resolution. This one covers the lower half of the frame.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"Swim area\",\n  \"polygon\": [\n    [\n      0,\n      0.5\n    ],\n    [\n      1,\n      0.5\n    ],\n    [\n      1,\n      1\n    ],\n    [\n      0,\n      1\n    ]\n  ]\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const z = pm.response.json();",
+         "pm.test(\"saved as a static zone with 4 points\", () => {",
+         "    pm.expect(z.mode).to.eql(\"static\");",
+         "    pm.expect(z.polygon.length).to.eql(4);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Read the danger zone — GET /api/zones/{camera_id}",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/{{camera_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "{{camera_id}}"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"it is the zone just written\", () =>",
+         "    pm.expect(pm.response.json().name).to.eql(\"Swim area\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Un-normalised polygon — 422",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/{{camera_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "{{camera_id}}"
+       ]
+      },
+      "description": "Pixel coordinates are rejected; only 0–1 is accepted.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"pixels\",\n  \"polygon\": [\n    [\n      0,\n      0\n    ],\n    [\n      1920,\n      0\n    ],\n    [\n      960,\n      1080\n    ]\n  ]\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A two-point polygon — 422",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/{{camera_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "{{camera_id}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"line\",\n  \"polygon\": [\n    [\n      0,\n      0\n    ],\n    [\n      1,\n      1\n    ]\n  ]\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 — a polygon needs at least 3 points\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Lifeguard cannot redraw a zone — 403",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/{{camera_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "{{camera_id}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"polygon\": [\n    [\n      0,\n      0\n    ],\n    [\n      1,\n      0\n    ],\n    [\n      1,\n      1\n    ]\n  ]\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Zone of an unknown camera — 404",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/zones/cam_nothinghere",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "zones",
+        "cam_nothinghere"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"404\", () => pm.response.to.have.status(404));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Cameras join the active beach; zones are normalised polygons. The first request captures camera_id for everything after it."
+  },
+  {
+   "name": "03 · Video analysis (the testing path)",
+   "item": [
+    {
+     "name": "Upload a video — POST /api/uploads",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/uploads",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "uploads"
+       ]
+      },
+      "description": "SELECT A FILE FIRST: open the Body tab and choose one of your own clips from videos\\. Postman cannot attach a file from a variable. mp4, avi, mov, mkv or m4v, up to OCEANEYE_MAX_UPLOAD_MB.",
+      "body": {
+       "mode": "formdata",
+       "formdata": [
+        {
+         "key": "file",
+         "type": "file",
+         "src": [],
+         "description": "Pick a video from the project's videos\\ folder"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "// No file attached (which is always the case under newman, since a CLI run cannot pick one):",
+         "// report it as skipped rather than failed, and let the rest of the folder skip too.",
+         "if (pm.response.code === 422 && !pm.response.text().includes(\"larger than\")) {",
+         "    pm.test.skip(\"no file attached — open the Body tab and choose a video from videos\\\\\");",
+         "    console.log(\"Skipped: attach a video in the Body tab to test the upload path.\");",
+         "} else {",
+         "    pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "    const u = pm.response.json();",
+         "    pm.collectionVariables.set(\"upload_id\", u.id);",
+         "    pm.test(\"the file was stored\", () => pm.expect(u.size_bytes).to.be.above(0));",
+         "    console.log(\"Uploaded \" + u.filename + \" (\" + (u.size_bytes / 1e6).toFixed(1) + \" MB) as \" + u.id);",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List uploads — GET /api/uploads",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/uploads",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "uploads"
+       ]
+      },
+      "description": "Also a fallback: if the upload above was skipped, this captures an existing upload so the analysis job still runs."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const ups = pm.response.json();",
+         "if (ups.length && !pm.collectionVariables.get(\"upload_id\")) {",
+         "    pm.collectionVariables.set(\"upload_id\", ups[0].id);",
+         "    console.log(\"Using an existing upload: \" + ups[0].filename);",
+         "}",
+         "if (!ups.length) {",
+         "    pm.test.skip(\"no videos uploaded yet — the analysis requests below will skip\");",
+         "    console.log(\"Upload a clip (previous request, or the Video Analysis page) to test analysis.\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Wrong file type — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/uploads",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "uploads"
+       ]
+      },
+      "description": "Attach any .txt or .png to confirm the type check. Skip if you prefer.",
+      "body": {
+       "mode": "formdata",
+       "formdata": [
+        {
+         "key": "file",
+         "type": "file",
+         "src": [],
+         "description": "Pick a NON-video file to prove the check works"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (pm.request.body && pm.request.body.formdata &&",
+         "    pm.request.body.formdata.members[0].src &&",
+         "    pm.request.body.formdata.members[0].src.length) {",
+         "    pm.test(\"422 for a non-video\", () => pm.response.to.have.status(422));",
+         "} else {",
+         "    pm.test.skip(\"no file attached — skipped\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Start an analysis job — POST /api/analysis/jobs",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs"
+       ]
+      },
+      "description": "auto model and imgsz let the worker size itself to this machine — the same policy the live cameras use. This spawns a real worker process: watch data\\logs\\worker_job_*.log.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"upload_id\": \"{{upload_id}}\",\n  \"camera_id\": \"{{camera_id}}\",\n  \"model\": \"auto\",\n  \"imgsz\": 0,\n  \"device\": \"auto\",\n  \"sensitivity\": \"high\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"upload_id\")) {",
+         "    pm.test.skip(\"needs an uploaded video — attach one in '03 · Upload a video'\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "const j = pm.response.json();",
+         "pm.collectionVariables.set(\"job_id\", j.id);",
+         "pm.test(\"queued or already running\", () =>",
+         "    pm.expect([\"queued\", \"running\"]).to.include(j.status));",
+         "console.log(\"Job \" + j.id + \" started. Poll the next request until it completes.\");"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Poll the job — GET /api/analysis/jobs/{id}",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs/{{job_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs",
+        "{{job_id}}"
+       ]
+      },
+      "description": "Send repeatedly until status is completed or failed. The first run downloads the model, so give it a minute. The summary reports the model and device actually chosen — this is where you confirm auto-tune picked something sensible for your GPU."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"job_id\")) {",
+         "    pm.test.skip(\"needs an analysis job — run '03 · Start an analysis job' first\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const j = pm.response.json();",
+         "console.log(\"status=\" + j.status + \"  progress=\" + Math.round(j.progress * 100) + \"%\" +",
+         "            \"  events=\" + j.events_created);",
+         "if (j.status === \"completed\") {",
+         "    pm.test(\"it produced an annotated video\", () => pm.expect(j.video_url).to.not.be.null);",
+         "    pm.test(\"the summary says what actually ran\", () => {",
+         "        pm.expect(j.summary.model).to.be.a(\"string\");",
+         "        pm.expect(j.summary.imgsz).to.be.above(0);",
+         "    });",
+         "    console.log(\"RESOLVED PROFILE: \" + j.summary.model + \" @\" + j.summary.imgsz +",
+         "                \" on \" + j.summary.device);",
+         "    console.log(\"SPEED: \" + j.summary.pipeline_fps + \" fps  (warm-up \" +",
+         "                j.summary.warmup_s + \"s, excluded from the rate)\");",
+         "    console.log(\"WHY: \" + j.summary.profile);",
+         "} else if (j.status === \"failed\") {",
+         "    console.log(\"FAILED: \" + j.error + \"   (see data\\\\logs\\\\worker_job_\" + j.id + \".log)\");",
+         "    pm.test.skip(\"job failed — read the worker log\");",
+         "} else {",
+         "    pm.test.skip(\"still \" + j.status + \" — send this request again\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List jobs — GET /api/analysis/jobs",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs?limit=10",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs"
+       ],
+       "query": [
+        {
+         "key": "limit",
+         "value": "10"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"job_id\")) {",
+         "    pm.test.skip(\"needs an analysis job — run '03 · Start an analysis job' first\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"the job is listed\", () =>",
+         "    pm.expect(pm.response.json().map(j => j.id))",
+         "      .to.include(pm.collectionVariables.get(\"job_id\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Watch the annotated video — GET /analysis/jobs/{id}/video",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs/{{job_id}}/video",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs",
+        "{{job_id}}",
+        "video"
+       ]
+      },
+      "description": "Only after the job completes. Postman shows it as binary; use Send and Download, or just watch it in the Video Analysis page."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (pm.response.code === 200) {",
+         "    pm.test(\"it is an mp4\", () =>",
+         "        pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"video\"));",
+         "} else {",
+         "    pm.test.skip(\"no overlay yet (job not finished) — response \" + pm.response.code);",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Invalid model name — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"upload_id\": \"{{upload_id}}\",\n  \"camera_id\": \"{{camera_id}}\",\n  \"model\": \"not-a-model.pt\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"upload_id\")) {",
+         "    pm.test.skip(\"needs an uploaded video — attach one in '03 · Upload a video'\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "imgsz that is not a multiple of 32 — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs"
+       ]
+      },
+      "description": "0 means auto; anything else must be a multiple of 32 between 320 and 1920.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"upload_id\": \"{{upload_id}}\",\n  \"camera_id\": \"{{camera_id}}\",\n  \"imgsz\": 777\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"upload_id\")) {",
+         "    pm.test.skip(\"needs an uploaded video — attach one in '03 · Upload a video'\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Upload a clip and run the full chain on it. This is how you test detection, risk, events and alerts without a real camera."
+  },
+  {
+   "name": "04 · Worker simulation (role: service)",
+   "item": [
+    {
+     "name": "Camera worker config — GET /processing/cameras/{id}/worker-config",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/processing/cameras/{{camera_id}}/worker-config",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "processing",
+        "cameras",
+        "{{camera_id}}",
+        "worker-config"
+       ]
+      },
+      "description": "What a real worker process fetches when it starts: the source, the zone and the resolved options. workers_sharing tells it how many siblings it shares memory with."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const cfg = pm.response.json();",
+         "pm.test(\"it carries the source and the zone\", () => {",
+         "    pm.expect(cfg.source).to.be.a(\"string\");",
+         "    pm.expect(cfg.camera.id).to.eql(pm.collectionVariables.get(\"camera_id\"));",
+         "});",
+         "console.log(\"options: \" + JSON.stringify(cfg.options));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Only the service role may read it — 403",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/processing/cameras/{{camera_id}}/worker-config",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "processing",
+        "cameras",
+        "{{camera_id}}",
+        "worker-config"
+       ]
+      },
+      "description": "This response contains the camera's stream URL, so no human role may read it."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403 for an operator\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Push a live frame — POST /processing/cameras/{id}/frame",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/processing/cameras/{{camera_id}}/frame",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "processing",
+        "cameras",
+        "{{camera_id}}",
+        "frame"
+       ]
+      },
+      "description": "Stands in for a worker's annotated frame. After this the camera shows as online in the Control Room for about 10 seconds, with these stats.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"jpeg_b64\": \"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDlaKKK8k+6P//Z\",\n  \"stats\": {\n    \"fps\": 7.4,\n    \"pipeline_ms\": 135.0,\n    \"people\": 9,\n    \"events\": 0,\n    \"model\": \"yolov8s.pt\",\n    \"device\": \"cuda:0\",\n    \"imgsz\": 768,\n    \"risks\": [\n      {\n        \"track_id\": \"T7\",\n        \"level\": \"high\",\n        \"score\": 0.71\n      }\n    ]\n  }\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"204 No Content\", () => pm.response.to.have.status(204));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Camera now reads as online — GET /api/live/cameras",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/live/cameras",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "live",
+        "cameras"
+       ]
+      },
+      "description": "Run within ~10 seconds of the frame push."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const mine = pm.response.json()",
+         "    .find(c => c.camera_id === pm.collectionVariables.get(\"camera_id\"));",
+         "pm.test(\"the camera appears\", () => pm.expect(mine).to.not.be.undefined);",
+         "pm.test(\"it is online with the pushed stats\", () => {",
+         "    pm.expect(mine.online).to.be.true;",
+         "    pm.expect(mine.stats.people).to.eql(9);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Fetch the live frame — GET /live/cameras/{id}/frame",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/live/cameras/{{camera_id}}/frame",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "live",
+        "cameras",
+        "{{camera_id}}",
+        "frame"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"it is a JPEG\", () =>",
+         "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.eql(\"image/jpeg\"));",
+         "pm.test(\"it is never cached\", () =>",
+         "    pm.expect(pm.response.headers.get(\"Cache-Control\")).to.include(\"no-store\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Malformed base64 — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/processing/cameras/{{camera_id}}/frame",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "processing",
+        "cameras",
+        "{{camera_id}}",
+        "frame"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"jpeg_b64\": \"@@@not-base64@@@\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Report worker state — POST /processing/cameras/{id}/state",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/processing/cameras/{{camera_id}}/state",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "processing",
+        "cameras",
+        "{{camera_id}}",
+        "state"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"state\": \"running\",\n  \"message\": \"model yolov8s.pt on cuda:0\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"204 No Content\", () => pm.response.to.have.status(204));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "These are the endpoints the separate worker process calls back on. Exercising them by hand lets you test the dashboard without running a model."
+  },
+  {
+   "name": "05 · Events, alerts & escalation",
+   "item": [
+    {
+     "name": "Raise a candidate event — POST /api/events",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ]
+      },
+      "description": "This is exactly what the worker POSTs when the risk engine decides something is actionable. Sending it by hand is the fastest way to test the whole alert path: a connected Control Room and lifeguard phone should react immediately.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"camera_id\": \"{{camera_id}}\",\n  \"track_id\": \"cam-T7\",\n  \"risk_score\": 0.72,\n  \"risk_level\": \"high\",\n  \"distress_signals\": [\n    \"vertical_bobbing\",\n    \"repeated_submersion\"\n  ],\n  \"reason\": \"inside danger zone; vertical_bobbing (0.80); elevated for 3.2s\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "const e = pm.response.json();",
+         "pm.collectionVariables.set(\"event_id\", e.id);",
+         "pm.test(\"it starts pending\", () => pm.expect(e.status).to.eql(\"pending\"));",
+         "pm.test(\"the camera's location was filled in\", () => {",
+         "    pm.expect(e.location.lat).to.be.a(\"number\");",
+         "    pm.expect(e.location.zone_name).to.eql(\"Swim area\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A human role cannot raise an event — 403",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ]
+      },
+      "description": "Only the vision service (and an administrator) may produce events, so a dashboard user cannot fabricate one.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"camera_id\": \"{{camera_id}}\",\n  \"track_id\": \"x\",\n  \"risk_score\": 0.5\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "risk_score out of range — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"camera_id\": \"{{camera_id}}\",\n  \"track_id\": \"x\",\n  \"risk_score\": 1.8\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 — risk_score must be 0..1\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List events — GET /api/events",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events?limit=20",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ],
+       "query": [
+        {
+         "key": "limit",
+         "value": "20"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"the new event is listed\", () =>",
+         "    pm.expect(pm.response.json().map(e => e.id))",
+         "      .to.include(pm.collectionVariables.get(\"event_id\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Filter by camera and status",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events?camera_id={{camera_id}}&status=pending",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ],
+       "query": [
+        {
+         "key": "camera_id",
+         "value": "{{camera_id}}"
+        },
+        {
+         "key": "status",
+         "value": "pending"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"the filter was applied\", () =>",
+         "    pm.response.json().forEach(e => {",
+         "        pm.expect(e.camera_id).to.eql(pm.collectionVariables.get(\"camera_id\"));",
+         "        pm.expect(e.status).to.eql(\"pending\");",
+         "    }));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Active alerts — GET /api/alerts",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/alerts?active_only=true&limit=20",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "alerts"
+       ],
+       "query": [
+        {
+         "key": "active_only",
+         "value": "true"
+        },
+        {
+         "key": "limit",
+         "value": "20"
+        }
+       ]
+      },
+      "description": "What the lifeguard phone polls. The payload is the whole alert in one object."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const mine = pm.response.json()",
+         "    .find(a => a.event_id === pm.collectionVariables.get(\"event_id\"));",
+         "pm.test(\"an alert was created for the event\", () => pm.expect(mine).to.not.be.undefined);",
+         "pm.collectionVariables.set(\"alert_id\", mine.id);",
+         "pm.test(\"it carries an acknowledgement deadline\", () =>",
+         "    pm.expect(mine.payload.ack_deadline).to.be.a(\"string\"));",
+         "pm.test(\"delivery was recorded per channel\", () =>",
+         "    pm.expect(mine.deliveries.length).to.be.above(0));",
+         "console.log(\"Delivery: \" + mine.deliveries.map(d => d.channel + \"=\" + d.status).join(\", \"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "One alert — GET /api/alerts/{id}",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/alerts/{{alert_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "alerts",
+        "{{alert_id}}"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Acknowledge — POST /events/{id}/ack",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{event_id}}/ack",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{event_id}}",
+        "ack"
+       ]
+      },
+      "description": "'I am responding.' This stops the escalation timer. The acknowledging user is taken from the authenticated identity, not the body.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"note\": \"responding from Postman\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const e = pm.response.json();",
+         "pm.test(\"status is acknowledged\", () => pm.expect(e.status).to.eql(\"acknowledged\"));",
+         "pm.test(\"the responder is recorded from the auth identity\", () =>",
+         "    pm.expect(e.acknowledgement.by).to.eql(pm.environment.get(\"test_user\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Acknowledging twice is rejected — 409",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{event_id}}/ack",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{event_id}}",
+        "ack"
+       ]
+      },
+      "description": "The event state machine refuses an impossible transition rather than silently overwriting who responded."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"409 Conflict\", () => pm.response.to.have.status(409));",
+         "pm.test(\"the reason names the transition\", () =>",
+         "    pm.expect(pm.response.json().error.code).to.eql(\"invalid_state_transition\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Escalate — POST /events/{id}/escalate",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{event_id}}/escalate",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{event_id}}",
+        "escalate"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reason\": \"no response on the radio\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const e = pm.response.json();",
+         "pm.test(\"escalated with a tier\", () => {",
+         "    pm.expect(e.status).to.eql(\"escalated\");",
+         "    pm.expect(e.escalation_level).to.be.above(0);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Close the loop — POST /events/{id}/outcome",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{event_id}}/outcome",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{event_id}}",
+        "outcome"
+       ]
+      },
+      "description": "resolved or false_alarm. These outcomes are the project's only labelled data — in a real deployment every single event gets one.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"outcome\": \"resolved\",\n  \"note\": \"swimmer reached the shore\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const e = pm.response.json();",
+         "pm.test(\"resolved and closed\", () => {",
+         "    pm.expect(e.status).to.eql(\"resolved\");",
+         "    pm.expect(e.closed_at).to.not.be.null;",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "An invalid outcome — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{event_id}}/outcome",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{event_id}}",
+        "outcome"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"outcome\": \"probably_fine\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Automatic escalation — raise an event and leave it",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ]
+      },
+      "description": "Do NOT acknowledge this one. Wait OCEANEYE_ACK_TIMEOUT_SECONDS (30 by default) and run the next request: the escalation monitor should have escalated it with no human action.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"camera_id\": \"{{camera_id}}\",\n  \"track_id\": \"cam-T9\",\n  \"risk_score\": 0.85,\n  \"risk_level\": \"critical\",\n  \"reason\": \"left unacknowledged on purpose, to test automatic escalation\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "pm.collectionVariables.set(\"timeout_event_id\", pm.response.json().id);",
+         "console.log(\"Now wait for the ack timeout (default 30s), then send the next request.\");"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "…did it escalate by itself?",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{timeout_event_id}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{timeout_event_id}}"
+       ]
+      },
+      "description": "Run this AFTER the acknowledgement deadline has passed."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const e = pm.response.json();",
+         "console.log(\"status=\" + e.status + \"  escalation tier=\" + e.escalation_level);",
+         "if (e.status === \"escalated\") {",
+         "    pm.test(\"escalated automatically, with no human action\", () =>",
+         "        pm.expect(e.escalation_level).to.be.above(0));",
+         "} else {",
+         "    pm.test.skip(\"still \" + e.status + \" — the deadline has not passed yet, send again\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Unknown event — 404",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/evt_nothinghere",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "evt_nothinghere"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"404\", () => pm.response.to.have.status(404));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "The full incident lifecycle: raised by the service, acknowledged by a lifeguard, escalated, closed. Run in order."
+  },
+  {
+   "name": "06 · Evidence & demo alerts",
+   "item": [
+    {
+     "name": "Inject a DEMO alert — POST /api/demo/incident",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/demo/incident",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "demo",
+        "incident"
+       ]
+      },
+      "description": "A clearly labelled rehearsal alert that uses the camera's last live frame as evidence. Use it to practise the lifeguard flow without waiting for the model to find something. Push a frame (folder 04) first so there is an image to attach.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"camera_id\": \"{{camera_id}}\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "const e = pm.response.json();",
+         "pm.collectionVariables.set(\"demo_event_id\", e.id);",
+         "pm.test(\"it is unmistakably marked as a demo\", () => pm.expect(e.reason).to.include(\"DEMO\"));",
+         "pm.test(\"no distress signals are invented for it\", () =>",
+         "    pm.expect(e.distress_signals).to.eql([]));",
+         "if (e.evidence_thumbnail_url) {",
+         "    pm.collectionVariables.set(\"evidence_url\", e.evidence_thumbnail_url);",
+         "    console.log(\"Evidence attached: \" + e.evidence_thumbnail_url);",
+         "} else {",
+         "    console.log(\"No evidence image — push a live frame (folder 04) first.\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Fetch the evidence image",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/evidence/{{demo_event_id}}/thumbnail",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "evidence",
+        "{{demo_event_id}}",
+        "thumbnail"
+       ]
+      },
+      "description": "Evidence is never on a public path — it is served only to an authenticated role."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (pm.response.code === 200) {",
+         "    pm.test(\"an image comes back\", () =>",
+         "        pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"image\"));",
+         "} else {",
+         "    pm.test.skip(\"no evidence on this event (push a live frame first)\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "SECURITY: evidence needs authentication — 401",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{api}}/evidence/{{demo_event_id}}/thumbnail",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "evidence",
+        "{{demo_event_id}}",
+        "thumbnail"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"401 with no role\", () => pm.response.to.have.status(401));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "SECURITY: path traversal in the event id is refused",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/evidence/..%2F..%2F..%2Fetc%2Fpasswd/thumbnail",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "evidence",
+        "..%2F..%2F..%2Fetc%2Fpasswd",
+        "thumbnail"
+       ]
+      },
+      "description": "Ids are pattern-validated, so a key can never escape the storage root."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"refused (422 or 404), never 200\", () => {",
+         "    pm.expect(pm.response.code).to.be.oneOf([404, 422]);",
+         "});",
+         "pm.test(\"nothing from the filesystem is returned\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"root:\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Close the demo event",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events/{{demo_event_id}}/outcome",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events",
+        "{{demo_event_id}}",
+        "outcome"
+       ]
+      },
+      "description": "Tidy up so the demo does not sit in the active list or skew the metrics.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"outcome\": \"false_alarm\",\n  \"note\": \"demo\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Evidence is protected; demo alerts are labelled so they can never be mistaken for model output."
+  },
+  {
+   "name": "07 · Phone background alerts (Web Push)",
+   "item": [
+    {
+     "name": "Is background push available? — GET /api/push/public-key",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/public-key",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "public-key"
+       ]
+      },
+      "description": "404 means this server has no VAPID keys configured — the lifeguard app then falls back to foreground sound and vibration instead of showing a button that cannot work. 200 with a key means background alerts are on."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (pm.response.code === 404) {",
+         "    pm.collectionVariables.set(\"push_enabled\", \"no\");",
+         "    pm.test(\"honestly reported as unavailable\", () => pm.response.to.have.status(404));",
+         "    console.log(\"Background push is OFF. To turn it on:\");",
+         "    console.log(\"  python scripts\\\\make_push_keys.py   (and HTTPS: scripts\\\\make_certs.py)\");",
+         "} else {",
+         "    pm.collectionVariables.set(\"push_enabled\", \"yes\");",
+         "    pm.test(\"200 with a VAPID public key\", () => {",
+         "        pm.response.to.have.status(200);",
+         "        pm.expect(pm.response.json().public_key).to.be.a(\"string\");",
+         "    });",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Register a device — POST /api/push/subscribe",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/subscribe",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "subscribe"
+       ]
+      },
+      "description": "A real phone sends this itself when the lifeguard taps 'Turn on alerts'. This fake subscription proves the endpoint and the privacy rules; it cannot receive a real push.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"endpoint\": \"https://fcm.googleapis.com/fcm/send/postman-fake-endpoint\",\n  \"keys\": {\n    \"p256dh\": \"BPostmanFakeP256dhKeyForTesting0000000\",\n    \"auth\": \"PostmanFakeAuth00000\"\n  },\n  \"label\": \"Postman test device\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (pm.collectionVariables.get(\"push_enabled\") === \"no\") {",
+         "    pm.test(\"501 when push is not configured\", () => pm.response.to.have.status(501));",
+         "    console.log(\"Expected: this installation has no push keys.\");",
+         "} else {",
+         "    pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+         "    pm.test(\"PRIVACY: the endpoint URL is never echoed back\", () => {",
+         "        pm.expect(pm.response.text()).to.not.include(\"fcm.googleapis.com\");",
+         "        pm.expect(pm.response.json().endpoint_hash).to.be.a(\"string\");",
+         "    });",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List registered devices — GET /api/push/devices",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_admin}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/devices",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "devices"
+       ]
+      },
+      "description": "Administrator-only, and it exposes only a hash plus the label the lifeguard typed."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"PRIVACY: no endpoint URLs in the listing\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"https://\"));",
+         "console.log(\"Devices that would be woken: \" + pm.response.json().length);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Any responder can see the registered phones — 200",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/devices",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "devices"
+       ]
+      },
+      "description": "Deliberately readable by an operator, not just an administrator: someone about to rely on phone alerts needs to see that a phone is actually registered, and the list exposes only a hash and the label the lifeguard typed."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 for an operator\", () => pm.response.to.have.status(200));",
+         "pm.test(\"endpoint URLs are never returned\", () =>",
+         "    pm.expect(pm.response.text()).to.not.include(\"https://fcm\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Only https endpoints accepted — 422",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/subscribe",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "subscribe"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"endpoint\": \"http://insecure.example/push\",\n  \"keys\": {\n    \"p256dh\": \"BPostmanFakeP256dhKeyForTesting0000000\",\n    \"auth\": \"PostmanFakeAuth00000\"\n  }\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422 or 501\", () => pm.expect(pm.response.code).to.be.oneOf([422, 501]));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Unregister the device — POST /api/push/unsubscribe",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_lifeguard}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/unsubscribe",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "unsubscribe"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"endpoint\": \"https://fcm.googleapis.com/fcm/send/postman-fake-endpoint\",\n  \"keys\": {\n    \"p256dh\": \"BPostmanFakeP256dhKeyForTesting0000000\",\n    \"auth\": \"PostmanFakeAuth00000\"\n  }\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"204 No Content\", () => pm.response.to.have.status(204));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A service account still cannot list phones — 403",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_service}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/devices",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "devices"
+       ]
+      },
+      "description": "Widening the device list to responders did not open it to the worker processes."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"403\", () => pm.response.to.have.status(403));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PC to phone: send a test alert — POST /api/push/test",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/push/test",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "push",
+        "test"
+       ]
+      },
+      "description": "The one honest answer to 'will the control room actually reach the phones?'. It goes through the real push channel, so a success here means a real alert would arrive too - including with the app closed and the screen off. It deliberately creates no Event, so it cannot pollute the incident log, the metrics or the false-alarm rate."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 when push is configured, 501 when it is not\",",
+         "    () => pm.expect(pm.response.code).to.be.oneOf([200, 501]));",
+         "if (pm.response.code === 200) {",
+         "    const r = pm.response.json();",
+         "    pm.test(\"reports how many phones were reached\", () => {",
+         "        pm.expect(r.sent).to.be.a(\"number\");",
+         "        pm.expect(r.devices).to.be.a(\"number\");",
+         "        pm.expect(r.detail).to.be.a(\"string\");",
+         "    });",
+         "    console.log(\"Test alert: \" + r.detail);",
+         "} else {",
+         "    console.log(\"Background push is not configured on this server - run scripts/make_push_keys.py\");",
+         "}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "A test alert leaves no incident behind",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/events?limit=20",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "events"
+       ],
+       "query": [
+        {
+         "key": "limit",
+         "value": "20"
+        }
+       ]
+      },
+      "description": "A connection check must not appear in the incident log: no event whose id is 'test'."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "pm.test(\"no event was created by the test alert\", () =>",
+         "    pm.expect(pm.response.json().some(e => e.id === \"test\")).to.be.false);"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Background alerts need HTTPS and VAPID keys. These requests tell you whether they are on, and prove the endpoint URL never leaves the server."
+  },
+  {
+   "name": "08 · Metrics & sea state",
+   "item": [
+    {
+     "name": "Metrics — GET /api/metrics",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/metrics",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "metrics"
+       ]
+      },
+      "description": "The north-star number is time from a distress signal to an acknowledged human response."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "const m = pm.response.json();",
+         "pm.test(\"response timing is tracked\", () =>",
+         "    pm.expect(m.response.time_to_ack).to.have.property(\"median_s\"));",
+         "pm.test(\"outcomes are counted\", () => pm.expect(m.events.by_status).to.be.an(\"object\"));",
+         "console.log(\"Events: \" + m.events.total + \"  active: \" + m.events.active +",
+         "            \"  demo: \" + m.events.demo_events);",
+         "console.log(\"Time to ack (median): \" + m.response.time_to_ack.median_s + \"s\" +",
+         "            \"   false-alarm rate: \" + m.events.false_alarm_rate);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Sea & weather — GET /api/weather",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/weather?lat={{beach_lat}}&lon={{beach_lon}}",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "weather"
+       ],
+       "query": [
+        {
+         "key": "lat",
+         "value": "{{beach_lat}}"
+        },
+        {
+         "key": "lon",
+         "value": "{{beach_lon}}"
+        }
+       ]
+      },
+      "description": "Open-Meteo, cached. status is ok / partial / unavailable — offline is never an error, because the risk engine must keep working without it."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK even when the feed is down\", () => pm.response.to.have.status(200));",
+         "const w = pm.response.json();",
+         "pm.test(\"status is one of the three honest values\", () =>",
+         "    pm.expect([\"ok\", \"partial\", \"unavailable\"]).to.include(w.status));",
+         "console.log(\"Weather: \" + w.status + \"  wind \" + w.wind_speed_ms +",
+         "            \" m/s  waves \" + w.wave_height_m + \" m\" + (w.error ? \"  (\" + w.error + \")\" : \"\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Weather with an out-of-range latitude — 422",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/weather?lat=999&lon=0",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "weather"
+       ],
+       "query": [
+        {
+         "key": "lat",
+         "value": "999"
+        },
+        {
+         "key": "lon",
+         "value": "0"
+        }
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"422\", () => pm.response.to.have.status(422));"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Numbers the control room shows, and the external feeds behind them."
+  },
+  {
+   "name": "09 · Clean up",
+   "item": [
+    {
+     "name": "Stop monitoring the test camera",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/cameras/{{camera_id}}/monitoring/stop",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "cameras",
+        "{{camera_id}}",
+        "monitoring",
+        "stop"
+       ]
+      },
+      "description": "Safe to run even if it was never started."
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Cancel the analysis job if it is still running",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-Dev-Role",
+        "value": "{{role_operator}}"
+       },
+       {
+        "key": "X-Dev-User",
+        "value": "{{test_user}}"
+       }
+      ],
+      "url": {
+       "raw": "{{api}}/analysis/jobs/{{job_id}}/cancel",
+       "host": [
+        "{{api}}"
+       ],
+       "path": [
+        "analysis",
+        "jobs",
+        "{{job_id}}",
+        "cancel"
+       ]
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "if (!pm.collectionVariables.get(\"job_id\")) {",
+         "    pm.test.skip(\"needs an analysis job — run '03 · Start an analysis job' first\");",
+         "    return;",
+         "}",
+         "",
+         "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+         "console.log(\"Job status: \" + pm.response.json().status);"
+        ]
+       }
+      }
+     ]
+    }
+   ],
+   "description": "Leaves the installation tidy. Cameras and beaches created by this run stay in the database on purpose — delete the whole thing with: del data\\oceaneye.db  (and restart the server)."
+  }
+ ],
+ "event": [
+  {
+   "listen": "test",
+   "script": {
+    "type": "text/javascript",
+    "exec": [
+     "// Applies to every request in the collection.",
+     "pm.test('responds in under 5s', () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+     "pm.test('SECURITY: no stack trace is ever returned', () => {",
+     "    pm.expect(pm.response.text()).to.not.include('Traceback (most recent call last)');",
+     "});",
+     "if (pm.response.code >= 500) {",
+     "    console.log('SERVER ERROR ' + pm.response.code + ' on ' + pm.request.url.toString());",
+     "}"
+    ]
+   }
+  }
+ ],
+ "variable": [
+  {
+   "key": "beach_id",
+   "value": ""
+  },
+  {
+   "key": "beach_lat",
+   "value": ""
+  },
+  {
+   "key": "beach_lon",
+   "value": ""
+  },
+  {
+   "key": "second_beach_id",
+   "value": ""
+  },
+  {
+   "key": "found_beach_name",
+   "value": ""
+  },
+  {
+   "key": "found_beach_lat",
+   "value": ""
+  },
+  {
+   "key": "found_beach_lon",
+   "value": ""
+  },
+  {
+   "key": "found_beach_source",
+   "value": ""
+  },
+  {
+   "key": "new_beach_name",
+   "value": ""
+  },
+  {
+   "key": "new_beach_lat",
+   "value": ""
+  },
+  {
+   "key": "new_beach_lon",
+   "value": ""
+  },
+  {
+   "key": "new_beach_source",
+   "value": ""
+  },
+  {
+   "key": "camera_id",
+   "value": ""
+  },
+  {
+   "key": "camera_name",
+   "value": ""
+  },
+  {
+   "key": "upload_id",
+   "value": ""
+  },
+  {
+   "key": "job_id",
+   "value": ""
+  },
+  {
+   "key": "event_id",
+   "value": ""
+  },
+  {
+   "key": "timeout_event_id",
+   "value": ""
+  },
+  {
+   "key": "demo_event_id",
+   "value": ""
+  },
+  {
+   "key": "alert_id",
+   "value": ""
+  },
+  {
+   "key": "evidence_url",
+   "value": ""
+  },
+  {
+   "key": "push_enabled",
+   "value": ""
+  },
+  {
+   "key": "place_query",
+   "value": "beach"
+  },
+  {
+   "key": "found_beach_address",
+   "value": ""
+  },
+  {
+   "key": "map_tile_url",
+   "value": ""
+  }
+ ]
+}

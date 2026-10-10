@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#16150f">
+<title>OceanEye</title>
+<link rel="icon" href="icons/favicon-64.png" sizes="64x64">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/oceaneye.css">
+</head>
+<body>
+<div id="offline">Offline — showing the last loaded page. Live alerts are paused.</div>
+<header class="top">
+  <div class="brand">Ocean<span>Eye</span><small>Drowning-risk detection</small></div>
+  <div class="spacer"></div>
+  <span class="pill" id="site">–</span>
+  <span class="pill" id="health"><span class="dot"></span>checking API…</span>
+</header>
+
+<main>
+  <div class="hero">
+    <a class="card" href="control.html">
+      <div class="eyebrow">Control room · PC</div>
+      <h3>Control Room</h3>
+      <div class="small">Everything the operator does: set the beach this installation watches, add
+      cameras and draw their danger zones, watch the wall with live risk overlays, work the active
+      incidents with their evidence, test recorded footage through the full detection chain, check
+      that lifeguard phones are reachable, and read the response metrics.</div>
+    </a>
+    <a class="card" href="lifeguard.html">
+      <div class="eyebrow">Lifeguard · phone</div>
+      <h3>Lifeguard Alerts</h3>
+      <div class="small">One screen per alert: the evidence frame, where it is, and one big
+      Acknowledge button. Alarm, vibration and background alerts are configurable, and it installs
+      to a phone's home screen so it rings with the app closed.</div>
+    </a>
+  </div>
+
+  <div class="panel">
+    <h2>What this is</h2>
+    <div class="note">
+      Decision support, not an autonomous authority. OceanEye raises <b>candidate events</b> from
+      interpretable rules (danger zone + behaviour signals + persistence) on a general-purpose person
+      detector. A human confirms every one. Thresholds are experimental and not validated against
+      labelled drowning footage.
+    </div>
+    <p class="small" style="margin-bottom:0">
+      API docs: <a href="/docs">/docs</a> · Health: <a href="/health">/health</a> ·
+      Readiness: <a href="/ready">/ready</a>
+      <span id="caps"></span>
+    </p>
+  </div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+  OE.init("operator", "home");
+  const health = document.getElementById("health");
+  fetch("/ready")
+    .then((r) => r.json())
+    .then((d) => {
+      const ok = d.status === "ready";
+      health.innerHTML = `<span class="dot ${ok ? "on" : "off"}"></span>API ${ok ? "ready" : "not ready"}`;
+    })
+    .catch(() => { health.innerHTML = '<span class="dot off"></span>API offline'; });
+
+  OE.loadConfig().then((cfg) => {
+    document.getElementById("site").textContent = cfg.beach ? cfg.beach.label : cfg.location_name;
+    const c = cfg.capabilities || {};
+    document.getElementById("caps").textContent =
+      ` · background phone alerts: ${c.web_push ? "on" : "off"} · secure connection: ${c.secure_context ? "yes" : "no"}`;
+  }).catch(() => {});
+</script>
+</body>
+</html>

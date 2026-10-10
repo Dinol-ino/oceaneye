@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#16150f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OceanEye">
+<title>OceanEye Control Room</title>
+<link rel="manifest" href="manifest-control.webmanifest">
+<link rel="icon" href="icons/favicon-64.png" sizes="64x64">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/oceaneye.css">
+</head>
+<body>
+<div id="offline">Offline — live alerts are paused and the figures below are frozen.</div>
+<div id="appbar">
+  <span id="appbarText"></span>
+  <span class="spacer"></span>
+  <button id="appbarAction" class="ghost">Install</button>
+  <button id="appbarDismiss" class="ghost">Dismiss</button>
+</div>
+
+<header class="top">
+  <div class="brand">Ocean<span>Eye</span><small>Control Room</small></div>
+  <span class="pill" id="sitePill">–</span>
+  <div class="spacer"></div>
+  <span class="pill"><span class="dot" id="wsdot"></span><span id="wstext">connecting…</span></span>
+  <span class="pill" id="clock">–</span>
+  <select id="role" title="Development role" aria-label="Development role"></select>
+  <a href="#analysis" class="pill">Video analysis</a>
+  <a href="lifeguard.html" class="pill" target="_blank" rel="noopener">Lifeguard view</a>
+</header>
+
+<main>
+  <!-- ------------------------------------------------------- deployment site -->
+  <section class="panel">
+    <h2>Deployment site <span class="spacer"></span>
+      <button class="ghost" id="siteBtn">Change beach</button></h2>
+    <div class="site" id="siteInfo"><span class="small">loading…</span></div>
+  </section>
+
+  <section class="kpis">
+    <div class="kpi" id="k-active"><div class="v">–</div><div class="l">Active incidents</div></div>
+    <div class="kpi" id="k-cams"><div class="v">–</div><div class="l">Cameras online</div></div>
+    <div class="kpi" id="k-people"><div class="v">–</div><div class="l">People in view</div></div>
+    <div class="kpi" id="k-ack"><div class="v">–</div><div class="l">Median time to ack</div></div>
+    <div class="kpi" id="k-fa"><div class="v">–</div><div class="l">False-alarm rate</div></div>
+    <div class="kpi" id="k-phones"><div class="v">–</div><div class="l">Phones on alert</div></div>
+  </section>
+
+  <section class="grid3">
+    <div class="panel">
+      <h2>Camera wall <span class="spacer"></span><button class="ghost" id="addCamBtn">Add camera</button></h2>
+      <div class="cams" id="cams">
+        <div class="empty">No cameras yet. Add one, or upload a clip in Video analysis below and
+        use it as a simulated CCTV feed.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Active incidents <span class="spacer"></span><span class="small" id="incCount"></span></h2>
+      <div class="incidents" id="incidents"><div class="empty">No active incidents.</div></div>
+    </div>
+
+    <div class="stack">
+      <div class="panel">
+        <h2>Map <span class="spacer"></span><span class="small" id="mapNote"></span></h2>
+        <div id="map"></div>
+        <div class="small" id="beachInfo" style="margin-top:6px"></div>
+      </div>
+      <div class="panel">
+        <h2>Sea &amp; weather <span class="spacer"></span><span class="small" id="wxStatus"></span></h2>
+        <div class="wx" id="wx"></div>
+        <div class="scroll" style="max-height:170px;margin-top:8px"><table id="fc"></table></div>
+        <div class="note" style="margin-top:8px">Wind, waves and tide come from an external feed.
+        They raise the risk score slightly in rough conditions; they never trigger an alert on their own.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- alerting -->
+  <section class="panel" id="alerting">
+    <h2>Alerting — control room to lifeguard phones</h2>
+    <div class="alert-status" id="alertStatus"></div>
+    <div class="btns" style="margin-top:10px">
+      <button id="testPhones">Send test alert to phones</button>
+      <button class="ghost" id="refreshPhones">Refresh</button>
+    </div>
+    <div class="small" id="testResult" style="margin-top:8px"></div>
+  </section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Event history <span class="spacer"></span>
+        <select id="histFilter" aria-label="Filter events by status">
+          <option value="">all</option>
+          <option>pending</option><option>acknowledged</option><option>escalated</option>
+          <option>resolved</option><option value="false_alarm">false alarm</option>
+        </select></h2>
+      <div class="scroll"><table id="history"></table></div>
+    </div>
+    <div class="panel"><h2>Performance &amp; response</h2><div id="metrics" class="small"></div></div>
+  </section>
+
+  <!-- ------------------------------------------------------- video analysis -->
+  <section class="panel" id="analysis">
+    <h2>Video analysis — test with recorded footage</h2>
+    <p class="note">Upload a clip and run the full chain on it: detection → tracking → danger zone →
+    behaviour rules → risk. Any events it raises appear above and on lifeguard phones exactly like
+    live ones, which is how you test the whole alert path without a camera.</p>
+
+    <div class="form" style="margin-top:12px">
+      <label>Video file(s) — mp4, avi, mov, mkv
+        <input type="file" id="file" accept="video/*" multiple></label>
+      <button id="upBtn">Upload</button>
+      <button class="ghost" id="upClear" title="Forget the chosen files and reset the progress bar">Clear</button>
+      <div>
+        <div class="progress"><i id="upProg" style="width:0"></i></div>
+        <span class="small" id="upText"></span>
+      </div>
+    </div>
+    <div class="scroll" style="margin-top:10px;max-height:180px"><table id="uploads"></table></div>
+
+    <div class="form" style="margin-top:14px;border-top:2px solid var(--line);padding-top:14px">
+      <label>Video<select id="aUpload"></select></label>
+      <label>Camera<select id="aCam"></select></label>
+      <label>Model<select id="aModel">
+        <option value="auto">auto — fit this machine</option>
+        <option value="yolov8n.pt">yolov8n — fastest</option>
+        <option value="yolov8s.pt">yolov8s — balanced</option>
+        <option value="yolov8m.pt">yolov8m — accurate (GPU)</option>
+        <option value="yolo11s.pt">yolo11s — newer</option>
+      </select></label>
+      <label>Image size<select id="aImg">
+        <option value="0">auto</option><option>512</option><option>640</option>
+        <option>768</option><option>960</option><option>1280</option>
+      </select></label>
+      <label>Sensitivity<select id="aSens">
+        <option value="medium">medium</option>
+        <option value="high">high — more alerts</option>
+        <option value="low">low</option>
+      </select></label>
+      <label>Device<select id="aDev">
+        <option value="auto">auto</option><option value="cpu">cpu</option><option value="cuda:0">cuda:0</option>
+      </select></label>
+      <button id="aGo">Run analysis</button>
+      <button class="ghost" id="aReset" title="Put model, image size, sensitivity and device back to auto">Reset to auto</button>
+    </div>
+    <p class="note warn" id="autoNote" style="margin-top:8px;display:none"></p>
+
+    <div class="btns" style="margin-top:14px">
+      <button class="ghost" id="jobsClear" title="Remove every completed, failed and cancelled run">
+        Clear finished jobs</button>
+    </div>
+    <div class="scroll" style="margin-top:8px;max-height:none"><table id="jobs"></table></div>
+  </section>
+</main>
+
+<!-- ------------------------------------------------------------- modals -->
+<div class="modal" id="siteModal"><div class="box">
+  <h2>Which beach does this installation watch?</h2>
+  <p class="small">OceanEye runs for one beach, operated by that beach's authority. Search for it,
+  pick it, and everything — cameras, incidents, weather, the map — follows it.</p>
+
+  <div class="searchbar">
+    <input id="sQuery" placeholder="Search a beach, town or district…" autocomplete="off"
+           aria-label="Search for a place">
+    <button id="sGo">Search</button>
+    <button class="ghost" id="sNearby">Beaches near the map centre</button>
+    <button class="ghost" id="sClear" title="Empty the search box and results">Clear</button>
+  </div>
+  <div class="results" id="sResults" style="margin-top:10px">
+    <div class="small">Type a place name and press Search.</div>
+  </div>
+
+  <h2 style="margin-top:18px;font-size:13px">Configured sites</h2>
+  <div class="results" id="sConfigured"></div>
+
+  <details style="margin-top:14px" id="sManualWrap">
+    <summary class="small">Add a beach by hand (when search is unavailable)</summary>
+    <div class="form" style="margin-top:8px">
+      <label>Name<input id="sName" placeholder="Panambur Beach"></label>
+      <label>Area<input id="sRegionText" placeholder="Mangaluru, Karnataka, India"></label>
+      <label>Latitude<input id="sLat" type="number" step="0.000001" placeholder="12.9300"></label>
+      <label>Longitude<input id="sLon" type="number" step="0.000001" placeholder="74.8000"></label>
+      <div class="btns">
+        <button id="sAdd">Add and use</button>
+        <button class="ghost" id="sManualClear">Clear fields</button>
+      </div>
+    </div>
+    <p class="small">Tip: close this dialog and click the map to read coordinates off it.</p>
+  </details>
+
+  <h2 style="margin-top:18px;font-size:13px">Beach authority</h2>
+  <div class="form">
+    <label>Authority name<input id="sAuthority" placeholder="Mangaluru Coastal Authority"></label>
+    <label>Contact phone<input id="sPhone" placeholder="+91 ..."></label>
+    <label>Lifeguards on duty<input id="sGuards" type="number" min="0" step="1"></label>
+    <div class="btns">
+      <button id="sSaveAuthority">Save details</button>
+      <button class="ghost" id="sAuthRevert" title="Discard edits and show the stored values">Revert</button>
+    </div>
+  </div>
+
+  <div class="btns" style="margin-top:14px"><button class="ghost" onclick="closeModal('siteModal')">Close</button></div>
+</div></div>
+
+<div class="modal" id="camModal"><div class="box">
+  <h2>Add camera</h2>
+  <div class="form">
+    <label>Name<input id="cName" value="North watch tower"></label>
+    <label>Latitude<input id="cLat" type="number" step="0.000001"></label>
+    <label>Longitude<input id="cLon" type="number" step="0.000001"></label>
+    <label>Source<select id="cSrc">
+      <option value="upload">Uploaded video (simulated CCTV)</option>
+      <option value="rtsp">RTSP / HTTP stream (CCTV, phone)</option>
+    </select></label>
+    <label id="cUpWrap">Video<select id="cUpload"></select></label>
+    <label id="cUrlWrap" style="display:none">Stream URL<input id="cUrl" placeholder="rtsp://192.168.1.20:8080/live"></label>
+  </div>
+  <p class="small">Click the map to fill latitude and longitude. The camera joins this beach.</p>
+  <div class="btns"><button id="cSave">Create camera</button>
+    <button class="ghost" onclick="closeModal('camModal')">Cancel</button></div>
+</div></div>
+
+<div class="modal" id="zoneModal"><div class="box">
+  <h2>Danger zone · <span id="zCam"></span></h2>
+  <p class="small">Click the image to place points around the water that is currently dangerous.
+  Coordinates are stored normalised (0–1), so they hold at any resolution. Start monitoring first to
+  see the live view.</p>
+  <canvas id="zCanvas" width="960" height="540"></canvas>
+  <div class="form" style="margin-top:8px"><label>Zone name<input id="zName" value="Swim / danger area"></label></div>
+  <div class="btns" style="margin-top:8px">
+    <button id="zSave">Save zone</button>
+    <button class="ghost" id="zUndo">Undo point</button>
+    <button class="ghost" id="zClear">Clear</button>
+    <button class="ghost" id="zHalf">Preset: lower half</button>
+    <button class="ghost" onclick="closeModal('zoneModal')">Close</button>
+  </div>
+</div></div>
+
+<div class="modal" id="clipModal"><div class="box">
+  <h2 id="clipTitle">Evidence</h2>
+  <video id="clipVideo" controls autoplay muted playsinline></video>
+  <div class="btns" style="margin-top:8px"><button class="ghost" onclick="closeModal('clipModal')">Close</button></div>
+</div></div>
+
+<div class="modal" id="vidModal"><div class="box">
+  <h2 id="vidTitle">Annotated result</h2>
+  <video id="vid" controls autoplay muted playsinline></video>
+  <div class="btns" style="margin-top:8px"><button class="ghost" onclick="closeModal('vidModal')">Close</button></div>
+</div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/api.js"></script>
+<script src="js/control.js"></script>
+</body>
+</html>

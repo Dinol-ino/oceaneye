@@ -1,0 +1,35 @@
+[project]
+name = "oceaneye"
+version = "0.3.0"
+description = "OceanEye - AI-assisted drowning-risk detection prototype (modular monolith)."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "httpx>=0.27",            # Open-Meteo / Overpass clients
+    "python-multipart>=0.0.9",  # video uploads
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+# Perception stage (YOLO + ByteTrack). NOTE: on Windows install a CUDA build of torch FIRST if you
+# want the GPU (see docs/perception.md); otherwise pip pulls the CPU-only torch from PyPI.
+vision = ["numpy>=1.24", "opencv-python>=4.8", "ultralytics>=8.3", "lap>=0.5.12", "imageio-ffmpeg>=0.5"]
+# Background phone alerts (Web Push). Needs HTTPS too - see the tls extra.
+push = ["pywebpush>=2.0", "cryptography>=42"]
+# Self-signed certificates for a LAN demo (scripts/make_certs.py).
+tls = ["cryptography>=42"]
+# Everything needed for the full prototype on one machine.
+all = ["oceaneye[dev,vision,push,tls]"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

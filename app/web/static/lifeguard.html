@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#b3221c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OE Lifeguard">
+<title>OceanEye Lifeguard</title>
+<link rel="manifest" href="manifest-lifeguard.webmanifest">
+<link rel="icon" href="icons/favicon-64.png" sizes="64x64">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-lifeguard.png">
+<link rel="stylesheet" href="css/oceaneye.css">
+</head>
+<body class="lg">
+<div id="offline">Offline — you are NOT receiving alerts. Fall back to normal watch.</div>
+<div id="appbar">
+  <span id="appbarText"></span>
+  <span class="spacer"></span>
+  <button id="appbarAction" class="ghost">Install</button>
+  <button id="appbarDismiss" class="ghost">Dismiss</button>
+</div>
+
+<header class="top">
+  <div class="brand">Ocean<span>Eye</span><small>Lifeguard</small></div>
+  <div class="spacer"></div>
+  <span class="pill" id="sitePill">–</span>
+  <span class="pill"><span class="dot" id="wsdot"></span><span id="wstext">connecting…</span></span>
+</header>
+
+<main>
+  <div class="panel" id="setup">
+    <h2>On duty</h2>
+    <div class="form">
+      <label>Your name / post
+        <input id="who" placeholder="e.g. Lifeguard Ravi – Tower 2" autocomplete="name">
+      </label>
+    </div>
+    <div class="btns" style="margin-top:10px">
+      <button id="enable" class="lg-enable danger">Turn on alerts</button>
+    </div>
+    <p class="small" id="perm" style="margin-bottom:0">
+      Tap once so this phone is allowed to sound the alarm.
+    </p>
+
+    <details id="alertOpts" style="margin-top:12px">
+      <summary class="small">Alert options</summary>
+      <div class="opts">
+        <label class="opt"><input type="checkbox" id="optSound" checked>
+          <span>Alarm sound while an alert is unacknowledged</span></label>
+        <label class="opt"><input type="checkbox" id="optVibrate" checked>
+          <span>Vibrate</span></label>
+        <label class="opt"><input type="checkbox" id="optRepeat" checked>
+          <span>Keep repeating until acknowledged</span></label>
+        <label class="opt"><input type="checkbox" id="optPush" checked>
+          <span>Background alerts — ring with the app closed</span></label>
+      </div>
+      <div class="btns" style="margin-top:10px">
+        <button class="ghost" id="optTest">Test the alarm on this phone</button>
+      </div>
+      <p class="small" id="layers" style="margin-bottom:0"></p>
+    </details>
+  </div>
+
+  <div id="alerts">
+    <div class="empty">No active alerts. You will hear an alarm when one arrives.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Remember</h2>
+    <p class="small" style="margin:0">
+      OceanEye flags <b>possible</b> distress. Always confirm visually.
+      <b>Acknowledge</b> means "I am responding" — it stops the alert escalating.
+      Emergency: <b id="emergency">112</b>.
+    </p>
+  </div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/lifeguard.js"></script>
+</body>
+</html>

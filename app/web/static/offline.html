@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#b3221c">
+<title>OceanEye — offline</title>
+<link rel="icon" href="/ui/icons/favicon-64.png" sizes="64x64">
+<link rel="stylesheet" href="/ui/css/oceaneye.css">
+</head>
+<body>
+<header class="top"><div class="brand">Ocean<span>Eye</span></div></header>
+<main>
+  <div class="panel">
+    <h2>No connection</h2>
+    <p><b>This device cannot reach the OceanEye server.</b></p>
+    <div class="note warn">
+      While this screen is showing, you are <b>not</b> receiving alerts. Treat the beach as unmonitored
+      and fall back to normal watch procedure until the connection returns.
+    </div>
+    <p class="small">Check that the phone is on the same Wi-Fi as the OceanEye computer, and that the
+    computer is awake and running the server.</p>
+    <div class="btns"><button onclick="location.reload()">Try again</button></div>
+  </div>
+</main>
+<script>
+  // Come back automatically the moment the network returns.
+  window.addEventListener("online", () => location.reload());
+  setInterval(() => { if (navigator.onLine) location.reload(); }, 10000);
+</script>
+</body>
+</html>

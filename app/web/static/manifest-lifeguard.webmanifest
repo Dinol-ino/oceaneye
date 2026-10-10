@@ -1,0 +1,18 @@
+{
+  "id": "/ui/lifeguard.html",
+  "name": "OceanEye Lifeguard",
+  "short_name": "OE Lifeguard",
+  "description": "Live drowning-risk alerts with alarm, evidence and one-tap acknowledge.",
+  "start_url": "/ui/lifeguard.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f3ef",
+  "theme_color": "#b3221c",
+  "icons": [
+    { "src": "/ui/icons/icon-lifeguard-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/icon-lifeguard-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/icon-lifeguard-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/ui/icons/icon-lifeguard-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
