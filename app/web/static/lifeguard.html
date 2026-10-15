@@ -36,6 +36,14 @@
       <label>Your name / post
         <input id="who" placeholder="e.g. Lifeguard Ravi – Tower 2" autocomplete="name">
       </label>
+      <label>Your post — which cameras you are covering
+        <select id="post" multiple size="4" aria-label="Cameras you are covering"></select>
+      </label>
+      <p class="small" id="postNote" style="margin:4px 0 0">
+        Leave nothing selected if you are roaming: you will then receive <b>every</b> alert for
+        this beach. Selecting a post does not cut you out — if no one covers a camera, its alert
+        still goes to everybody.
+      </p>
     </div>
     <div class="btns" style="margin-top:10px">
       <button id="enable" class="lg-enable danger">Turn on alerts</button>

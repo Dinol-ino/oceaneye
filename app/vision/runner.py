@@ -60,14 +60,20 @@ class RunSummary:
 
 
 def default_pipeline_factory(config: PerceptionConfig) -> PipelineFactory:
-    """YOLO detector + ByteTrack tracker. ``fps`` is the effective (post-stride) frame rate."""
+    """YOLO detector + ByteTrack tracker, plus YOLO-pose when ``config.pose.enabled``.
+
+    ``fps`` is the effective (post-stride) frame rate.
+    """
     def build(fps: float) -> VisionPipeline:
         from app.vision.detection.yolo import YoloDetector
         from app.vision.pipeline.default import DefaultVisionPipeline
+        from app.vision.pose.yolo_pose import YoloPoseEstimator
         from app.vision.tracking.bytetrack import ByteTrackTracker
 
+        pose_cfg = getattr(config, "pose", None)
+        pose = YoloPoseEstimator(pose_cfg) if pose_cfg is not None and pose_cfg.enabled else None
         return DefaultVisionPipeline(YoloDetector(config.detector),
-                                     ByteTrackTracker(config.tracker, frame_rate=fps))
+                                     ByteTrackTracker(config.tracker, frame_rate=fps), pose)
     return build
 
 

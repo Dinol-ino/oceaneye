@@ -118,7 +118,13 @@ class Settings(BaseSettings):
     logs_dir: Path = Path("./data/logs")
     max_upload_mb: int = 500
     max_workers: int = 0  # 0 = auto (sized from GPU/CPU memory); each worker loads its own model
-    worker_api_url: str = "http://127.0.0.1:8000"
+    #: Where a worker subprocess calls the API back. Left unset it is DERIVED from this server's
+    #: own scheme, host and port (see ``_derive_worker_api_url``) - it must never be hardcoded.
+    #: A fixed "http://127.0.0.1:8000" silently broke every worker the moment TLS was switched on:
+    #: a plaintext request to a TLS socket is closed without a reply, so the worker died with
+    #: "Remote end closed connection without response" and the job showed only "exited with code 1".
+    #: Set it explicitly only when the worker must reach the API by some other address.
+    worker_api_url: str | None = None
     worker_model: str = AUTO  # auto | yolov8n.pt | yolov8s.pt | ... | a path to .pt weights
     worker_imgsz: int = 0  # 0 = auto
     worker_device: str = AUTO  # auto | cpu | cuda:0 | mps
@@ -176,6 +182,21 @@ class Settings(BaseSettings):
             if not self.ssl_certfile:
                 raise ValueError("TLS is required in production: set OCEANEYE_SSL_CERTFILE / _KEYFILE "
                                  "(or terminate TLS in front of the app)")
+        return self
+
+    @model_validator(mode="after")
+    def _derive_worker_api_url(self) -> "Settings":
+        """Point workers at this server, over the scheme it actually serves.
+
+        ``host`` may be 0.0.0.0 (``run_api.py --lan``), which is a bind address, not somewhere a
+        client can connect to; a worker on this machine uses the loopback address instead. The
+        loopback literal is also what the self-signed certificate carries as a SAN, so TLS
+        verification succeeds without disabling it.
+        """
+        if self.worker_api_url is None:
+            scheme = "https" if self.tls_enabled else "http"
+            host = "127.0.0.1" if self.host in ("0.0.0.0", "::", "") else self.host
+            object.__setattr__(self, "worker_api_url", f"{scheme}://{host}:{self.port}")
         return self
 
     @property

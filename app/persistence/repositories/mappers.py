@@ -145,11 +145,13 @@ def push_to_model(s: PushSubscription) -> PushSubscriptionModel:
     return PushSubscriptionModel(endpoint_hash=s.endpoint_hash, endpoint=s.endpoint, p256dh_key=s.p256dh_key,
                                  auth_key=s.auth_key, role=s.role.value, label=s.label,
                                  created_at=s.created_at, last_success_at=s.last_success_at,
-                                 last_attempt_at=s.last_attempt_at, consecutive_failures=s.consecutive_failures)
+                                 last_attempt_at=s.last_attempt_at, consecutive_failures=s.consecutive_failures,
+                                 assigned_camera_ids=list(s.assigned_camera_ids) or None)
 
 
 def push_to_entity(m: PushSubscriptionModel) -> PushSubscription:
     return PushSubscription(endpoint_hash=m.endpoint_hash, endpoint=m.endpoint, p256dh_key=m.p256dh_key,
                             auth_key=m.auth_key, role=Role(m.role), created_at=m.created_at, label=m.label,
                             last_success_at=m.last_success_at, last_attempt_at=m.last_attempt_at,
-                            consecutive_failures=m.consecutive_failures or 0)
+                            consecutive_failures=m.consecutive_failures or 0,
+                            assigned_camera_ids=tuple(m.assigned_camera_ids or ()))

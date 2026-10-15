@@ -32,7 +32,7 @@ class OneTrack(Tracker):
     def reset(self, camera_id): self.hist.clear()
 
 
-def session(tmp_path, zone, *, sensitivity="high", frames=120, size=(64, 48), fps=10, mode="job",
+def session(tmp_path, zone, *, sensitivity="high", frames=120, size=(160, 120), fps=10, mode="job",
             loop=False, max_frames=None, clip_max_width=0):
     video = make_video(tmp_path / "v.mp4", frames=frames, size=size, fps=fps)
     cfg = SessionConfig(mode=mode, camera_id="cam_t", camera_name="test", lat=1, lon=2, source=str(video),

@@ -46,7 +46,10 @@ uploads/
 # ------------------------------------------------------------------------------
 # 4. Computer Vision Models & Weights (Heavy binary files)
 # ------------------------------------------------------------------------------
-models/
+# Leading slash anchors this to the repository root. Unanchored, "models/" also matched
+# app/persistence/models/ - the SQLAlchemy schema package - so the entire database schema was
+# untracked and a fresh clone could not start the application.
+/models/
 *.pt
 *.pth
 *.onnx

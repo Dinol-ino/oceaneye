@@ -28,9 +28,18 @@ def build_mock_worker(settings: Settings, zone_repo: ZoneRepository, clock: Cloc
 
 
 def build_perception_pipeline(config, fps: float = 30.0):
-    """Real perception chain (YOLO + ByteTrack). Needs the ``vision`` extras; imports are lazy."""
+    """Real perception chain (YOLO + ByteTrack, optional YOLO-pose). Needs the ``vision`` extras.
+
+    Pose is attached only when ``config.pose.enabled`` - it is a second model on the same device,
+    so the cost is opted into rather than paid silently. Without it the pipeline behaves exactly
+    as before and the pose distress signals are simply never raised.
+    """
     from app.vision.detection.yolo import YoloDetector
     from app.vision.pipeline.default import DefaultVisionPipeline
+    from app.vision.pose.yolo_pose import YoloPoseEstimator
     from app.vision.tracking.bytetrack import ByteTrackTracker
 
-    return DefaultVisionPipeline(YoloDetector(config.detector), ByteTrackTracker(config.tracker, frame_rate=fps))
+    pose_cfg = getattr(config, "pose", None)
+    pose = YoloPoseEstimator(pose_cfg) if pose_cfg is not None and pose_cfg.enabled else None
+    return DefaultVisionPipeline(YoloDetector(config.detector),
+                                 ByteTrackTracker(config.tracker, frame_rate=fps), pose)

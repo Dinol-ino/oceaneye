@@ -63,10 +63,8 @@ def test_bobbing_erratic_and_submersion():
     assert S.VERTICAL_BOBBING in signals(track(bob))
     zig = [(500 + (60 if i % 2 else 0), 300 + 40 * (i % 3)) for i in range(20)]
     assert S.ERRATIC_MOVEMENT in signals(track(zig))
-    sizes = [100, 100, 40, 100, 100, 40, 100, 100, 100, 100]
-    assert S.REPEATED_SUBMERSION in signals(track([(500, 300)] * 10, sizes=sizes))
-    gaps = [T0 + timedelta(seconds=s) for s in (0, .2, .4, 1.0, 1.2, 1.4, 2.0, 2.2, 2.4, 2.6)]
-    assert S.REPEATED_SUBMERSION in signals(track([(500 + i, 300) for i in range(10)], times=gaps))
+    sizes = [100] * 6 + [100, 100, 40, 100, 100, 40, 100, 100, 100, 100]
+    assert S.REPEATED_SUBMERSION in signals(track([(500, 300)] * len(sizes), sizes=sizes))
 
 
 def _input(engine_now, inside=True, conf=1.0, sig=S.REPEATED_SUBMERSION, waves=None, tid="cam-T1"):
@@ -100,3 +98,99 @@ def test_engine_environment_boost_levels_and_rate_limit():
 
 def test_presets_change_thresholds():
     assert RiskScoringConfig.preset("high").alert_threshold < RiskScoringConfig.preset("low").alert_threshold
+
+
+# ---- pose-driven signals ----------------------------------------------------------------------
+# These are the only signals that can separate a swimmer from someone in difficulty: a bounding box
+# drifting in water looks the same either way. They run entirely on keypoint geometry, so they are
+# testable with no model, no GPU and no footage.
+
+from app.vision.pose.base import PoseEstimate, PoseKeypoint  # noqa: E402
+
+
+def pose_at(*, shoulder_y, hip_y, shoulder_x=100.0, hip_x=100.0, wrist_y=None, nose_y=None,
+            t=T0, track_id="cam-T1"):
+    """A COCO-17 pose with only the keypoints a signal needs; the rest are absent, which is
+    exactly what a real pose model returns for a half-submerged person."""
+    kp = [
+        PoseKeypoint("left_shoulder", shoulder_x - 10, shoulder_y, 0.9),
+        PoseKeypoint("right_shoulder", shoulder_x + 10, shoulder_y, 0.9),
+        PoseKeypoint("left_hip", hip_x - 8, hip_y, 0.8),
+        PoseKeypoint("right_hip", hip_x + 8, hip_y, 0.8),
+    ]
+    if nose_y is not None:
+        kp.append(PoseKeypoint("nose", shoulder_x, nose_y, 0.9))
+    if wrist_y is not None:
+        kp.append(PoseKeypoint("left_wrist", shoulder_x - 15, wrist_y, 0.8))
+    return PoseEstimate(track_id, t, tuple(kp))
+
+
+def pose_signals(tr, pose):
+    a = RuleBasedBehaviorAnalyzer().analyze(tr, pose, tr.last_seen)
+    return {s.type for s in a.signals}
+
+
+def still_track(n=40):
+    """Long enough to satisfy the vertical signal's observation window, barely moving."""
+    return track([(100 + (i % 2), 200) for i in range(n)])
+
+
+def test_vertical_torso_while_going_nowhere_is_flagged():
+    """Upright in the water with no headway: the posture half of the instinctive drowning
+    response. Shoulders above hips in image coordinates means a vertical body."""
+    tr = still_track()
+    assert S.VERTICAL_IN_WATER in pose_signals(tr, pose_at(shoulder_y=180, hip_y=240, t=tr.last_seen))
+
+
+def test_a_horizontal_swimmer_is_not_flagged():
+    """Front crawl, breaststroke, floating: the torso lies across the image. This is the case the
+    whole signal exists to exclude, so it matters more than the positive."""
+    tr = still_track()
+    pose = PoseEstimate("cam-T1", tr.last_seen, (
+        PoseKeypoint("left_shoulder", 100, 200, 0.9), PoseKeypoint("right_shoulder", 110, 200, 0.9),
+        PoseKeypoint("left_hip", 170, 203, 0.8), PoseKeypoint("right_hip", 170, 207, 0.8),
+    ))
+    assert S.VERTICAL_IN_WATER not in pose_signals(tr, pose)
+
+
+def test_vertical_but_travelling_is_not_flagged():
+    """Someone wading ashore is upright and perfectly fine. Without the drift test this signal
+    would fire on every person standing in the shallows."""
+    tr = track([(100 + i * 12, 200) for i in range(40)])
+    assert S.VERTICAL_IN_WATER not in pose_signals(tr, pose_at(shoulder_y=180, hip_y=240, t=tr.last_seen))
+
+
+def test_missing_torso_keypoints_raise_nothing():
+    """A pose the model could not resolve means UNKNOWN, never safe and never dangerous."""
+    tr = still_track()
+    empty = PoseEstimate("cam-T1", tr.last_seen, ())
+    assert pose_signals(tr, empty) == signals(tr)
+
+
+def test_a_wrist_above_the_shoulders_raises_arms_raised():
+    tr = still_track()
+    pose = pose_at(shoulder_y=200, hip_y=260, nose_y=170, wrist_y=150, t=tr.last_seen)
+    assert S.ARMS_RAISED in pose_signals(tr, pose)
+
+
+def test_arms_down_do_not_raise_it():
+    tr = still_track()
+    pose = pose_at(shoulder_y=200, hip_y=260, nose_y=170, wrist_y=250, t=tr.last_seen)
+    assert S.ARMS_RAISED not in pose_signals(tr, pose)
+
+
+def test_occlusion_alone_is_not_counted_as_submersion():
+    """Regression. A track vanishing for a few frames used to count as going under, so the
+    highest-weighted signal fired whenever one beachgoer walked in front of another. Only the box
+    collapsing while the track survives counts now."""
+    times = [T0 + timedelta(seconds=s) for s in (0.0, 0.2, 0.4, 1.4, 1.6, 1.8, 2.8, 3.0, 3.2)]
+    gappy = track([(100, 200)] * len(times), times=times)
+    assert S.REPEATED_SUBMERSION not in signals(gappy)
+
+
+def test_a_body_repeatedly_sinking_is_still_counted():
+    """The real thing must survive the occlusion fix: the box collapses and recovers, with the
+    track held continuously throughout."""
+    sizes = [100] * 6 + [100, 100, 40, 100, 100, 40, 100, 100, 40, 100]
+    sinking = track([(100, 200)] * len(sizes), sizes=sizes, dt=0.2)
+    assert S.REPEATED_SUBMERSION in signals(sinking)

@@ -29,6 +29,9 @@ class DistressSignalType(str, Enum):
     PROLONGED_STILLNESS = "prolonged_stillness"
     REPEATED_SUBMERSION = "repeated_submersion"
     ARMS_RAISED = "arms_raised"
+    #: Torso upright in the water while making no headway. Swimming is horizontal; the instinctive
+    #: drowning response is vertical. Needs a pose model - see app.vision.pose.yolo_pose.
+    VERTICAL_IN_WATER = "vertical_in_water"
 
 
 class Role(str, Enum):

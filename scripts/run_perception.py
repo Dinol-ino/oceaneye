@@ -40,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--show", action="store_true", help="live preview window (q to quit)")
     p.add_argument("--trail", type=int, default=OverlayConfig.trail_length, help="trajectory length in frames")
     p.add_argument("--trail-anchor", choices=["center", "bottom"], default="center")
-    p.add_argument("--track-buffer", type=int, default=TrackerConfig.track_buffer)
+    p.add_argument("--track-buffer-seconds", type=float, default=TrackerConfig.track_buffer_seconds,
+                   help="seconds a lost track keeps its identity (was a frame count; seconds are "
+                        "frame-rate independent, so the tracker behaves the same on any machine)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -53,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         camera_id=args.camera_id,
         detector=DetectorConfig(model=args.model, weights_dir=args.weights_dir, device=args.device,
                                 imgsz=args.imgsz, conf=args.conf),
-        tracker=TrackerConfig(track_buffer=args.track_buffer),
+        tracker=TrackerConfig(track_buffer_seconds=args.track_buffer_seconds),
         overlay=OverlayConfig(trail_length=args.trail, trail_anchor=args.trail_anchor),
         stride=args.stride, max_frames=args.max_frames, output_dir=args.output_dir,
         save_video=not args.no_video, save_tracks=not args.no_tracks, show=args.show,

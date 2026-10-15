@@ -156,7 +156,9 @@
     },
 
     /** Subscribe this browser for background alerts. Returns {ok, reason}. */
-    async enablePush(label) {
+    /** `cameraIds` is the guard's post: which cameras they cover. An empty list means roaming,
+     *  and a roaming device receives every alert - never fewer. */
+    async enablePush(label, cameraIds = []) {
       const blocked = this.pushBlockedReason();
       if (blocked) return { ok: false, reason: blocked };
       try {
@@ -172,7 +174,8 @@
         const body = sub.toJSON();
         await this.api("/push/subscribe", {
           method: "POST",
-          json: { endpoint: body.endpoint, keys: body.keys, label: label || this.user },
+          json: { endpoint: body.endpoint, keys: body.keys, label: label || this.user,
+                  assigned_camera_ids: cameraIds },
         });
         return { ok: true };
       } catch (err) {
@@ -245,8 +248,13 @@
       return code == null ? "–" : (m[code] || `code ${code}`);
     },
 
+    /** `roles` is a list of wire values, or [value, label] pairs where the label is what the
+     *  operator reads. The wire value is always the Role the API expects. */
     roleSelect(el, roles) {
-      el.innerHTML = roles.map((r) => `<option ${r === this.role ? "selected" : ""}>${r}</option>`).join("");
+      el.innerHTML = roles.map((r) => {
+        const [value, label] = Array.isArray(r) ? r : [r, r];
+        return `<option value="${value}" ${value === this.role ? "selected" : ""}>${label}</option>`;
+      }).join("");
       el.onchange = () => { this.setRole(el.value); location.reload(); };
     },
   };

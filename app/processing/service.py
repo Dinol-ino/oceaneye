@@ -158,12 +158,44 @@ class ProcessingService:
             raise
         return job
 
+    #: How much of the worker log to scan for the line that explains a crash.
+    _LOG_TAIL_BYTES = 8000
+
+    def _worker_error(self, key: str) -> str | None:
+        """The worker's own last error line, if its log has one.
+
+        "exited with code 1" is true and useless: the reason is in the subprocess log, which an
+        operator looking at the Control Room cannot see. Surfacing the actual exception turns a
+        dead end into something diagnosable without a terminal.
+        """
+        path = self._launcher.log_path(key)
+        if not path:
+            return None
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, 2)
+                fh.seek(max(0, fh.tell() - self._LOG_TAIL_BYTES))
+                tail = fh.read().decode("utf-8", errors="replace")
+        except OSError:
+            return None  # the log is the diagnostic aid, never the thing that breaks reaping
+        # A traceback's last line carries the exception; prefer it over the generic header.
+        lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+        for line in reversed(lines):
+            if ("Error" in line or "Exception" in line) and not line.startswith("File \""):
+                return line[:400]
+        return lines[-1][:400] if lines else None
+
     def _reap(self, job: AnalysisJob) -> AnalysisJob:
         if job.status in (JobStatus.QUEUED, JobStatus.RUNNING) and not self._launcher.is_running(f"job:{job.id}"):
             code = self._launcher.exit_code(f"job:{job.id}")
             if code is not None:  # process ended without reporting completion
+                key = f"job:{job.id}"
                 job.status, job.finished_at = JobStatus.FAILED, self._clock.now()
-                job.error = f"worker exited with code {code}; see {self._launcher.log_path(f'job:{job.id}')}"
+                reason = self._worker_error(key)
+                job.error = (f"{reason} (worker exit code {code}; full log: {self._launcher.log_path(key)})"
+                             if reason
+                             else f"worker exited with code {code}; see {self._launcher.log_path(key)}")
+                logger.warning("analysis job %s failed: %s", job.id, job.error)
                 self._jobs.save(job)
         return job
 

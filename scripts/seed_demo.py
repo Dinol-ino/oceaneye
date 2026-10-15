@@ -19,26 +19,47 @@ from pathlib import Path
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.config.settings import get_settings  # noqa: E402
+
 NAMES = ["North watch tower", "Central lifeguard post", "South rocks", "Estuary mouth", "Pier view", "Family zone"]
 EXT = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
 DEMO_ZONE = [[0, 0.4], [1, 0.4], [1, 1], [0, 1]]
 
 
 def main() -> int:
+    s = get_settings()
+    default_api = f"{'https' if s.tls_enabled else 'http'}://127.0.0.1:{s.port}"
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--api", default="http://127.0.0.1:8000")
+    ap.add_argument("--api", default=default_api)
     ap.add_argument("--videos", default=str(ROOT / "videos"))
     ap.add_argument("--start", type=int, default=0, help="start monitoring this many cameras")
     args = ap.parse_args()
 
     headers = {"X-Dev-Role": "operator", "X-Dev-User": "demo-seed"}
     # verify=False: the prototype's TLS certificate is self-signed on purpose (scripts/make_certs.py).
-    with httpx.Client(base_url=args.api + "/api", headers=headers, timeout=120, verify=False) as c:
+    api_url = args.api.rstrip("/")
+    try_urls = [api_url]
+    if api_url.startswith("http://"):
+        try_urls.append("https://" + api_url[len("http://"):])
+
+    cfg = None
+    last_exc = None
+    for url in try_urls:
         try:
-            cfg = c.get("/config/public").raise_for_status().json()
+            with httpx.Client(base_url=url + "/api", headers=headers, timeout=120, verify=False) as c:
+                cfg = c.get("/config/public").raise_for_status().json()
+                api_url = url
+                break
         except httpx.HTTPError as exc:
-            print(f"API not reachable at {args.api} ({exc}). Start it first: python scripts/run_api.py")
-            return 1
+            last_exc = exc
+
+    if cfg is None:
+        print(f"API not reachable at {args.api} ({last_exc}). Start it first: python scripts/run_api.py")
+        return 1
+
+    with httpx.Client(base_url=api_url + "/api", headers=headers, timeout=120, verify=False) as c:
 
         beach = cfg.get("beach")
         if not beach:

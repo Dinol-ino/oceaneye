@@ -13,7 +13,11 @@
 "use strict";
 
 OE.init("operator", "control-room");
-OE.roleSelect(document.getElementById("role"), ["operator", "administrator", "lifeguard"]);
+// Two roles, not three. OceanEye runs for ONE beach: the person who configures the site is the
+// person who watches it, so splitting "operator" and "administrator" only produced a dialog that
+// failed with "Insufficient permissions" and no way to tell which half you were. The wire value
+// stays `operator` so stored principals and the Role enum are unchanged.
+OE.roleSelect(document.getElementById("role"), [["operator", "controller"], ["lifeguard", "lifeguard"]]);
 
 const $ = (id) => document.getElementById(id);
 const ACTIVE_STATUSES = ["pending", "acknowledged", "escalated"];
@@ -363,8 +367,19 @@ $("cSrc").onchange = () => {
 $("cSave").onclick = async () => {
   const body = { name: $("cName").value, lat: +$("cLat").value, lon: +$("cLon").value };
   if (BEACH) body.beach_id = BEACH.id;
-  if ($("cSrc").value === "upload") body.video_upload_id = $("cUpload").value;
-  else { body.stream_url = $("cUrl").value; body.source_type = "rtsp"; }
+  if ($("cSrc").value === "upload") {
+    // An uploaded clip is a FILE, and the worker decides whether to loop from source_type. Leaving
+    // it at the schema default (rtsp) stored a camera that pointed at a local path but was treated
+    // as a network stream, so it never opened and the camera sat "offline" with no explanation.
+    if (!$("cUpload").value) return OE.toast("Upload a video first, or choose a stream URL", "err");
+    body.video_upload_id = $("cUpload").value;
+    body.source_type = "video_file";
+  } else {
+    if (!$("cUrl").value.trim()) return OE.toast("Enter the stream URL", "err");
+    body.stream_url = $("cUrl").value.trim();
+    body.source_type = "rtsp";
+  }
+  if (!body.name.trim()) return OE.toast("Give the camera a name", "err");
   try {
     await OE.api("/cameras", { method: "POST", json: body });
     closeModal("camModal");
@@ -623,7 +638,6 @@ async function refreshMetrics() {
   set("k-fa", OE.pct(m.events.false_alarm_rate));
 
   const t = m.response.time_to_ack;
-  const hw = (CFG && CFG.hardware) || {};
   $("metrics").innerHTML = `<table>
     <tr><th colspan="2">Response — distress signal to acknowledged response</th></tr>
     <tr><td>acknowledged events</td><td>${t.count}</td></tr>
@@ -641,8 +655,6 @@ async function refreshMetrics() {
     ).join("") || '<tr><td colspan="2">no live cameras</td></tr>'}
     <tr><td>completed video jobs</td>
         <td>${m.jobs.completed} · avg ${m.jobs.avg_pipeline_fps ?? "–"} fps · ${m.jobs.frames_processed} frames</td></tr>
-    <tr><td>this machine</td><td>${OE.esc(hw.gpu || `${hw.cpu_count ?? "?"} CPU cores`)}${
-      hw.vram_gb ? ` · ${hw.vram_gb} GB VRAM` : ""} · ${CFG ? CFG.max_workers : "?"} worker slot(s)</td></tr>
     </table>
     <p class="note">False-alarm rate = false alarms ÷ closed events. Mark every event Resolved or
     False alarm — those outcomes are the labelled data used to tune thresholds and, later, train a model.</p>`;

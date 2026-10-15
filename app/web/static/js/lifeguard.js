@@ -58,7 +58,7 @@ Object.values(OPTS).forEach((id) => ($(id).onchange = async () => {
   savePrefs();
   if (id === OPTS.push) {
     if ($(id).checked) {
-      pushState = await OE.enablePush($("who").value.trim() || OE.user);
+      pushState = await OE.enablePush($("who").value.trim() || OE.user, chosenPosts());
       if (!pushState.ok) OE.toast(pushState.reason, "err");
     } else {
       await OE.disablePush();
@@ -79,6 +79,30 @@ $("optTest").onclick = () => {
 
 /* ---------------------------------------------------------------- setup */
 
+/** Fill the post picker from this beach's cameras. A guard picks the tower they are standing at;
+ *  picking nothing means roaming, which receives everything. */
+async function loadPosts() {
+  try {
+    const cams = await OE.api("/cameras");
+    $("post").innerHTML = cams.map((c) => `<option value="${c.id}">${OE.esc(c.name)}</option>`).join("")
+      || "<option value='' disabled>no cameras configured yet</option>";
+    const saved = JSON.parse(localStorage.getItem("oe.post") || "[]");
+    [...$("post").options].forEach((o) => (o.selected = saved.includes(o.value)));
+  } catch (e) {
+    $("postNote").textContent = `Could not load cameras (${e.message}). You will receive every alert.`;
+  }
+}
+
+/** The cameras this guard covers, remembered on this phone so a reload does not quietly turn a
+ *  posted guard back into a roaming one. */
+function chosenPosts() {
+  const ids = [...$("post").selectedOptions].map((o) => o.value).filter(Boolean);
+  try { localStorage.setItem("oe.post", JSON.stringify(ids)); } catch { /* private mode */ }
+  return ids;
+}
+
+loadPosts();
+
 $("who").value = OE.user === "lifeguard" ? "" : OE.user;
 $("who").onchange = () => OE.setUser($("who").value.trim().slice(0, 60) || "lifeguard");
 
@@ -89,7 +113,7 @@ $("enable").onclick = async () => {
 
   const notes = ["Alarm sound on."];
   if (prefs().push) {
-    pushState = await OE.enablePush($("who").value.trim() || OE.user);
+    pushState = await OE.enablePush($("who").value.trim() || OE.user, chosenPosts());
     notes.push(pushState.ok
       ? "Background alerts on — this phone will ring even with the app closed."
       : `${pushState.reason} Keep this page open and the screen on.`);

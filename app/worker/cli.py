@@ -29,7 +29,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     threads = int(os.environ.get("OCEANEYE_WORKER_THREADS", settings.worker_threads))
-    client = ApiClient(args.api or settings.worker_api_url, settings.api_prefix)
+    # The worker talks to the API over whatever scheme the API actually serves, and trusts this
+    # installation's certificate when that is TLS (see ApiClient._build_ssl_context).
+    client = ApiClient(args.api or settings.worker_api_url, settings.api_prefix,
+                       cafile=settings.ssl_certfile)
     evidence = LocalEvidenceStorage(settings.evidence_dir)
 
     from app.vision.devices import limit_torch_threads

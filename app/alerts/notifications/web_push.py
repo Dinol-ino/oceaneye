@@ -46,6 +46,40 @@ PUSH_ROLES = (Role.LIFEGUARD, Role.OPERATOR)
 PUSHABLE = (AlertNotificationType.CREATED, AlertNotificationType.ESCALATED)
 
 
+def select_targets(subscriptions, camera_id: str | None):
+    """Which phones this alert goes to, and a one-word record of why.
+
+    Posts, not GPS. A guard registers the camera (tower, stretch of beach) they are covering, and
+    an alert from that camera reaches them. This needs no location permission, no battery drain,
+    and nothing from a phone sitting in a pocket with no signal - and it matches how beaches are
+    actually staffed.
+
+    Two rules keep it safe rather than merely clever:
+
+    * A device with **no post** is roaming and receives everything. That is the default, so a
+      guard who skipped the setting, or a phone registered before posts existed, is never
+      silently cut out of alerts.
+    * If a camera has **no covering guard and no roamers**, the alert goes to **everyone**. An
+      alert that reaches the wrong guard is an inconvenience; a drowning alert that reaches
+      nobody because the roster was mis-entered is the failure this whole system exists to
+      prevent. Narrow routing must never be able to produce silence.
+
+    Returns ``(targets, routing)`` where ``routing`` is "assigned", "roaming-only" or
+    "broadcast-fallback", so the control room can see which rule fired.
+    """
+    pure_broadcast = list(subscriptions)
+    if not camera_id:
+        return pure_broadcast, "broadcast-no-camera"
+    assigned = [s for s in subscriptions if camera_id in (s.assigned_camera_ids or ())]
+    roaming = [s for s in subscriptions if not (s.assigned_camera_ids or ())]
+    chosen = assigned + [s for s in roaming if s not in assigned]
+    if chosen:
+        return chosen, ("assigned" if assigned else "roaming-only")
+    logger.warning("no guard covers camera %s and none are roaming; broadcasting to all %d device(s)",
+                   camera_id, len(pure_broadcast))
+    return pure_broadcast, "broadcast-fallback"
+
+
 def _title(notification: AlertNotification) -> str:
     if is_test_notification(notification.payload):
         # A connection check must never read like a swimmer in trouble.
@@ -112,16 +146,17 @@ class WebPushNotificationProvider(NotificationProvider):
         if notification.type not in PUSHABLE:
             return [DeliveryRecord(self.channel, DeliveryStatus.SKIPPED, notification.sent_at,
                                    f"{notification.type.value} is not pushed")]
-        targets = [s for role in PUSH_ROLES for s in self._subs.list(role.value)]
-        if not targets:
+        subscribed = [s for role in PUSH_ROLES for s in self._subs.list(role.value)]
+        if not subscribed:
             return [DeliveryRecord(self.channel, DeliveryStatus.SKIPPED, notification.sent_at,
                                    "no devices subscribed")]
+        targets, routing = select_targets(subscribed, notification.payload.camera_id)
         payload = build_push_payload(notification)
         results = await asyncio.gather(*(self._deliver(s, payload) for s in targets))
         sent = sum(1 for ok in results if ok)
         status = DeliveryStatus.SENT if sent else DeliveryStatus.FAILED
         return [DeliveryRecord(self.channel, status, notification.sent_at,
-                               f"{sent}/{len(targets)} device(s)")]
+                               f"{sent}/{len(targets)} device(s) [{routing}]")]
 
     async def _deliver(self, sub, payload: bytes) -> bool:
         """Push to one device. Never raises: one dead phone must not silence the others."""

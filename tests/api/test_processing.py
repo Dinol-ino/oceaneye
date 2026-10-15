@@ -185,3 +185,14 @@ def test_a_lifeguard_cannot_remove_test_material(client, camera, launcher):
     u = upload(client)
     assert client.delete(f"/api/uploads/{u['id']}", headers=LIFEGUARD).status_code == 403
     assert client.post("/api/analysis/jobs/clear-finished", headers=LIFEGUARD).status_code == 403
+
+
+def test_an_uploaded_clip_camera_is_stored_as_a_file_not_a_stream(client):
+    """Regression: the UI could create a camera whose stream_url was a local path but whose
+    source_type was the schema default (rtsp). The worker then never looped or opened it, and the
+    camera sat 'offline' with nothing explaining why."""
+    u = upload(client)
+    cam = client.post("/api/cameras", headers=OPERATOR,
+                      json={"name": "Sim feed", "lat": 12.9, "lon": 74.8,
+                            "video_upload_id": u["id"]}).json()   # no source_type sent at all
+    assert cam["source_type"] == "video_file"

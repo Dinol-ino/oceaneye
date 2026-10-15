@@ -1,0 +1,23 @@
+{
+  "_README": [
+    "Copy to labels.json and edit. Times are SECONDS from the start of each clip.",
+    "'distress': windows where someone was genuinely in difficulty. [] means a negative clip -",
+    "nothing in it should alert, and anything that does is a false alarm.",
+    "'zone': optional danger-zone polygon, normalised 0..1, origin top-left. Omit for whole frame.",
+    "Negatives are the cheapest and most valuable clips to label: ordinary busy-beach footage.",
+    "Run:  python scripts/evaluate_detection.py --labels labels.json"
+  ],
+  "clips": [
+    {
+      "file": "videos/gettyimages-2214078267-640_adpp.mp4",
+      "distress": [],
+      "notes": "negative - ordinary beach activity, nothing should fire"
+    },
+    {
+      "file": "videos/REPLACE_WITH_A_DISTRESS_CLIP.mp4",
+      "distress": [[12.0, 26.0]],
+      "zone": [[0.0, 0.45], [1.0, 0.45], [1.0, 1.0], [0.0, 1.0]],
+      "notes": "swimmer in difficulty from 0:12 to 0:26"
+    }
+  ]
+}

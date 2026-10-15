@@ -32,6 +32,10 @@ class PushSubscription:
     role: Role
     created_at: datetime
     label: str | None = None  # e.g. "Lifeguard Ravi - Tower 2", so a stale device can be identified
+    #: Cameras this guard covers. EMPTY MEANS ROAMING - the device receives every alert for the
+    #: beach. Empty is the default on purpose: a guard who has not picked a post must not be
+    #: silently excluded from alerts, and devices registered before posts existed keep working.
+    assigned_camera_ids: tuple[str, ...] = ()
     last_success_at: datetime | None = None
     last_attempt_at: datetime | None = None
     consecutive_failures: int = 0
@@ -44,5 +48,7 @@ class PushSubscription:
 
     @classmethod
     def create(cls, endpoint: str, p256dh_key: str, auth_key: str, role: Role, created_at: datetime,
-               label: str | None = None) -> "PushSubscription":
-        return cls(endpoint_fingerprint(endpoint), endpoint, p256dh_key, auth_key, role, created_at, label)
+               label: str | None = None,
+               assigned_camera_ids: tuple[str, ...] = ()) -> "PushSubscription":
+        return cls(endpoint_fingerprint(endpoint), endpoint, p256dh_key, auth_key, role, created_at,
+                   label, assigned_camera_ids=tuple(assigned_camera_ids))

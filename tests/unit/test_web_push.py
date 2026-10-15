@@ -167,3 +167,53 @@ def test_a_tampered_hash_is_rejected():
 def test_missing_keys_are_rejected():
     with pytest.raises(DomainValidationError):
         PushSubscription.create("https://push.example/1", "", "a" * 12, Role.LIFEGUARD, NOW)
+
+
+# ---- post-based routing ------------------------------------------------------------------------
+# Posts, not GPS: a guard registers the camera they cover. The rules below exist so that narrowing
+# who gets an alert can never produce silence.
+
+from app.alerts.notifications.web_push import select_targets  # noqa: E402
+from app.core.entities.push import PushSubscription  # noqa: E402
+from app.core.enums import Role  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+
+_T = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def sub(name, cameras=()):
+    return PushSubscription.create(endpoint=f"https://push.example/{name}", p256dh_key="k",
+                                   auth_key="a", role=Role.LIFEGUARD, created_at=_T,
+                                   label=name, assigned_camera_ids=tuple(cameras))
+
+
+def test_an_alert_goes_to_the_guard_covering_that_camera():
+    north, south = sub("north", ["cam_1"]), sub("south", ["cam_2"])
+    targets, routing = select_targets([north, south], "cam_1")
+    assert [t.label for t in targets] == ["north"] and routing == "assigned"
+
+
+def test_a_roaming_guard_receives_everything():
+    """No post selected means roaming. This is the default, so a guard who skipped the setting -
+    or a phone registered before posts existed - is never silently cut out."""
+    posted, roaming = sub("north", ["cam_1"]), sub("rover")
+    targets, _ = select_targets([posted, roaming], "cam_2")
+    assert [t.label for t in targets] == ["rover"]
+    both, _ = select_targets([posted, roaming], "cam_1")
+    assert {t.label for t in both} == {"north", "rover"}
+
+
+def test_an_uncovered_camera_falls_back_to_everyone():
+    """The safety-critical case. An alert reaching the wrong guard is an inconvenience; a drowning
+    alert reaching nobody because the roster was mis-entered is the failure this system exists to
+    prevent. Narrow routing must never be able to produce silence."""
+    north, south = sub("north", ["cam_1"]), sub("south", ["cam_2"])
+    targets, routing = select_targets([north, south], "cam_9")
+    assert {t.label for t in targets} == {"north", "south"}
+    assert routing == "broadcast-fallback"
+
+
+def test_an_alert_with_no_camera_goes_to_everyone():
+    north = sub("north", ["cam_1"])
+    targets, routing = select_targets([north], None)
+    assert targets == [north] and routing == "broadcast-no-camera"

@@ -38,12 +38,15 @@ class SubscriptionIn(BaseModel):
     endpoint: str = Field(min_length=12, max_length=1000, pattern=r"^https://")
     keys: SubscriptionKeys
     label: str | None = Field(default=None, max_length=80)
+    #: Cameras this guard is covering. Omitted or empty = roaming (receives every alert).
+    assigned_camera_ids: list[str] = Field(default_factory=list, max_length=32)
 
 
 class DeviceOut(BaseModel):
     endpoint_hash: str
     role: str
     label: str | None
+    assigned_camera_ids: list[str] = Field(default_factory=list)
     consecutive_failures: int
 
 
@@ -74,10 +77,12 @@ async def subscribe(body: SubscriptionIn, principal: Principal = Depends(require
     subscription = PushSubscription.create(
         endpoint=body.endpoint, p256dh_key=body.keys.p256dh, auth_key=body.keys.auth,
         role=principal.role, created_at=container.clock.now(),
-        label=(body.label or principal.subject)[:80])
+        label=(body.label or principal.subject)[:80],
+        assigned_camera_ids=tuple(dict.fromkeys(body.assigned_camera_ids)))  # de-duped, order kept
     repo.save(subscription)
     return DeviceOut(endpoint_hash=subscription.endpoint_hash, role=subscription.role.value,
-                     label=subscription.label, consecutive_failures=0)
+                     label=subscription.label, consecutive_failures=0,
+                     assigned_camera_ids=list(subscription.assigned_camera_ids))
 
 
 @router.post("/unsubscribe", status_code=204)
@@ -96,7 +101,8 @@ async def list_devices(repo=Depends(get_push_repository)):
     needs to see that a phone is actually registered, and a hash plus a label reveals nothing.
     """
     return [DeviceOut(endpoint_hash=s.endpoint_hash, role=s.role.value, label=s.label,
-                      consecutive_failures=s.consecutive_failures) for s in repo.list()]
+                      consecutive_failures=s.consecutive_failures,
+                      assigned_camera_ids=list(s.assigned_camera_ids)) for s in repo.list()]
 
 
 @router.post("/test", dependencies=[Depends(require_roles(*RESPONDER_ROLES))])

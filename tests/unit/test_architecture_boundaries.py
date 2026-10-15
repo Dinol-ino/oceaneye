@@ -73,6 +73,7 @@ LAZY_ONLY = {"cv2", "ultralytics", "torch"}  # must be imported inside functions
 HEAVY_ALLOWED = {
     "camera/infrastructure/opencv_source.py", "vision/detection/yolo.py", "vision/tracking/bytetrack.py",
     "vision/devices.py", "vision/visualization/overlay.py", "vision/runner.py", "vision/media.py",
+    "vision/pose/yolo_pose.py",
 }
 
 

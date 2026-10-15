@@ -56,8 +56,16 @@ def _default_backend(cfg: TrackerConfig, frame_rate: float) -> Any:
     import inspect  # noqa: PLC0415
 
     takes_frame_rate = "frame_rate" in inspect.signature(BYTETracker.__init__).parameters  # older Ultralytics
-    # Newer Ultralytics counts the lost-track buffer in raw frames, so scale it to the source FPS ourselves.
-    buffer = cfg.track_buffer if takes_frame_rate else max(1, int(round(cfg.track_buffer * frame_rate / 30.0)))
+    # The buffer is configured in SECONDS and converted here against the rate frames actually
+    # arrive at. Older Ultralytics divides by frame_rate internally and so expects a 30 fps-
+    # equivalent count; newer versions count raw frames. Either way the track survives the same
+    # real-world gap, which is what matters when a swimmer is hidden by a wave for two seconds.
+    if takes_frame_rate:
+        buffer = cfg.track_buffer                       # 30 fps-equivalent; backend rescales
+    else:
+        buffer = max(1, int(round(cfg.track_buffer_seconds * max(frame_rate, 1.0))))
+    logger.info("tracker: lost-track buffer %.1fs (%d frames at %.1f fps), new-track threshold %.2f",
+                cfg.track_buffer_seconds, buffer, frame_rate, cfg.new_track_thresh)
     args = SimpleNamespace(
         track_high_thresh=cfg.track_high_thresh, track_low_thresh=cfg.track_low_thresh,
         new_track_thresh=cfg.new_track_thresh, track_buffer=buffer,

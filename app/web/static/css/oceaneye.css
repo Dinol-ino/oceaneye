@@ -230,7 +230,9 @@ main { padding: var(--gutter); display: grid; gap: var(--gutter); max-width: 168
 .pill.lvl.critical { background: var(--tint-critical); border-color: var(--critical); color: var(--critical); }
 
 /* ---------- map, weather, tables ---------- */
-#map { height: 320px; border-radius: var(--radius); border: 2px solid var(--line); }
+/* isolation keeps Leaflet's internal z-indexes from competing with the rest of the page: the map
+   stacks against its own panel, not against modals and the sticky header. */
+#map { height: 320px; border-radius: var(--radius); border: 2px solid var(--line); isolation: isolate; }
 .wx { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .wx div { background: var(--surface-sunk); border-radius: var(--radius); padding: 8px; }
 .wx b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
@@ -265,7 +267,10 @@ tbody tr:hover, table tr:hover { background: var(--surface-sunk); }
 /* ---------- modal ---------- */
 .modal {
   position: fixed; inset: 0; background: rgba(22, 21, 15, 0.6);
-  display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px;
+  /* Above Leaflet. Leaflet's own controls (zoom, layer switcher) sit at z-index 800-1000 and its
+     panes at 400-700, so a modal below that renders *underneath* the map's buttons - the dialog
+     opens and the zoom control floats on top of it. */
+  display: none; align-items: center; justify-content: center; z-index: 1200; padding: 16px;
 }
 .modal.open { display: flex; }
 .modal .box {
@@ -276,7 +281,9 @@ tbody tr:hover, table tr:hover { background: var(--surface-sunk); }
 .modal video, .modal canvas { width: 100%; border-radius: var(--radius); background: var(--ink); display: block; }
 
 /* ---------- toasts ---------- */
-#toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
+/* Above the modals (1200): a toast reporting why a dialog action failed must not appear behind
+   the dialog that caused it. */
+#toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 1300; }
 .toast {
   background: var(--surface); border: 2px solid var(--line); border-left-width: 6px; border-left-color: var(--sea);
   padding: 10px 14px; border-radius: var(--radius); max-width: 360px; font-weight: 600;
