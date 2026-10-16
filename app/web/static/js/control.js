@@ -886,7 +886,11 @@ $("upBtn").onclick = async () => {
         if (x.status >= 300) {
           let m = x.statusText;
           try { m = JSON.parse(x.responseText).error.message; } catch { /* keep statusText */ }
-          OE.toast(`${f.name}: ${m}`, "err");
+          if (x.status === 403) {
+            OE.toast(`${f.name}: Insufficient permissions — switch the role selector at the top right to 'controller' and try again`, "err");
+          } else {
+            OE.toast(`${f.name}: ${m}`, "err");
+          }
         }
         resolve();
       };
@@ -925,7 +929,13 @@ $("aGo").onclick = async () => {
     });
     OE.toast("Analysis started — the first progress appears once the model has loaded");
     loadJobs();
-  } catch (e) { OE.toast(e.message, "err"); }
+  } catch (e) {
+    if (e.status === 403) {
+      OE.toast("Starting analysis requires operator permissions — switch role at top right to 'controller'", "err");
+    } else {
+      OE.toast(e.message, "err");
+    }
+  }
 };
 
 function jobRow(j, uploadNames) {
@@ -945,10 +955,10 @@ function jobRow(j, uploadNames) {
     <td>${s.max_concurrent_people ?? "–"}</td>
     <td>${s.unique_track_ids ?? "–"}</td>
     <td>${j.events_created}</td>
-    <td>${j.video_url ? `<button data-v="${j.id}" data-u="${j.video_url}">Watch</button>` : ""}
+    <td>${j.video_url ? `<button data-v="${j.id}" data-u="${j.video_url}" style="font-weight:bold;background:#0d6efd;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer;border:none">▶ Watch</button>` : ""}
         ${["queued", "running"].includes(j.status) ? `<button class="ghost" data-c="${j.id}">Cancel</button>`
                                                      : `<button class="ghost" data-rm="${j.id}">Remove</button>`}
-        ${j.error ? `<span class="small" title="${OE.esc(j.error)}">${OE.esc(j.error.slice(0, 70))}</span>` : ""}</td>
+        ${j.error ? `<span class="small" style="color:var(--err)" title="${OE.esc(j.error)}">${OE.esc(j.error.slice(0, 75))}</span>` : ""}</td>
   </tr>`;
 }
 
@@ -963,7 +973,9 @@ async function loadJobs() {
   $("jobs").querySelectorAll("[data-v]").forEach((b) => (b.onclick = async () => {
     $("vidTitle").textContent = "Annotated result";
     $("vidModal").classList.add("open");
-    $("vid").src = await OE.blobUrl(b.dataset.u, "job");
+    const blobUrl = await OE.blobUrl(b.dataset.u, "job");
+    $("vid").src = blobUrl;
+    if ($("vidDl")) $("vidDl").href = blobUrl;
   }));
   $("jobs").querySelectorAll("[data-c]").forEach((b) => (b.onclick = async () => {
     await OE.api(`/analysis/jobs/${b.dataset.c}/cancel`, { method: "POST" });

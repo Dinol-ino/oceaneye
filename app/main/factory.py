@@ -40,6 +40,26 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None, lau
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+        import sys
+        if sys.platform == "win32":
+            loop = asyncio.get_running_loop()
+            orig = loop.get_exception_handler()
+
+            def _filter_winerror10054(lp, ctx):
+                exc = ctx.get("exception")
+                msg = str(ctx.get("message") or "")
+                if isinstance(exc, ConnectionResetError) or (isinstance(exc, OSError) and getattr(exc, "winerror", None) == 10054):
+                    return
+                if "WinError 10054" in msg or "forcibly closed by the remote host" in msg:
+                    return
+                if orig:
+                    orig(lp, ctx)
+                else:
+                    lp.default_exception_handler(ctx)
+
+            loop.set_exception_handler(_filter_winerror10054)
+
         await container.start()
         logger.info("OceanEye API ready")
         yield

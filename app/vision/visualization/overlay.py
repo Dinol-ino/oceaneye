@@ -46,19 +46,56 @@ def _label(img, text: str, org: tuple[int, int], color) -> None:
     cv2.putText(img, text, (x + 2, y - 2), FONT, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
 
 
+STATUS_COLORS = {
+    "low": (50, 205, 50),       # Green - Normal swimming / safe
+    "medium": (0, 215, 255),     # Amber / Yellow - Caution
+    "high": (30, 30, 240),       # Bright Red - High risk / distress
+    "critical": (0, 0, 255),     # Deep Red - Critical drowning danger
+}
+
+
+def _draw_corners(img, p1: tuple[int, int], p2: tuple[int, int], color, length: int = 12, thickness: int = 2) -> None:
+    x1, y1 = p1
+    x2, y2 = p2
+    l = min(length, max(2, (x2 - x1) // 4), max(2, (y2 - y1) // 4))
+    if l <= 1:
+        return
+    cv2.line(img, (x1, y1), (x1 + l, y1), color, thickness)
+    cv2.line(img, (x1, y1), (x1, y1 + l), color, thickness)
+    cv2.line(img, (x2, y1), (x2 - l, y1), color, thickness)
+    cv2.line(img, (x2, y1), (x2, y1 + l), color, thickness)
+    cv2.line(img, (x1, y2), (x1 + l, y2), color, thickness)
+    cv2.line(img, (x1, y2), (x1, y2 - l), color, thickness)
+    cv2.line(img, (x2, y2), (x2 - l, y2), color, thickness)
+    cv2.line(img, (x2, y2), (x2, y2 - l), color, thickness)
+
+
 def draw_tracks(image: np.ndarray, tracks: list[Track], cfg: OverlayConfig | None = None, *,
                 frame_index: int | None = None, timestamp_s: float | None = None,
-                camera_id: str | None = None, fps: float | None = None) -> np.ndarray:
-    """Return an annotated COPY of ``image`` (BGR uint8)."""
+                camera_id: str | None = None, fps: float | None = None,
+                risks: dict[str, tuple[str, float]] | None = None) -> np.ndarray:
+    """Return an annotated COPY of ``image`` (BGR uint8) with dynamic color-coded swimmer tracking."""
     cfg = cfg or OverlayConfig()
     out = image.copy()
     h, w = out.shape[:2]
+
+    # Multi-person prioritization: find the target with highest risk to prioritize
+    priority_track_id = None
+    max_risk = 0.0
+    if risks:
+        for tr in tracks:
+            level, score = risks.get(tr.track_id, ("low", 0.0))
+            if score > max_risk and level in ("medium", "high", "critical"):
+                max_risk = score
+                priority_track_id = tr.track_id
+
     for tr in tracks:
-        color = track_color(tr.track_id)
+        level, risk_score = risks.get(tr.track_id, ("low", 0.0)) if risks is not None else ("low", 0.0)
+        is_priority = (tr.track_id == priority_track_id)
+        color = STATUS_COLORS.get(level, (50, 205, 50)) if risks is not None else track_color(tr.track_id)
         pts = [_anchor(d.bbox, cfg.trail_anchor) for d in tr.history[-cfg.trail_length:]]
         n = len(pts)
         if n > 1:
-            # One polylines call per fade band instead of one line call per segment.
             bands = min(4, n - 1)
             for band in range(bands):
                 lo = 1 + band * (n - 1) // bands
@@ -72,17 +109,71 @@ def draw_tracks(image: np.ndarray, tracks: list[Track], cfg: OverlayConfig | Non
         b = tr.current.bbox
         p1 = (int(max(0, b.x_min)), int(max(0, b.y_min)))
         p2 = (int(min(w - 1, b.x_max)), int(min(h - 1, b.y_max)))
-        cv2.rectangle(out, p1, p2, color, cfg.thickness)
+        box_thickness = max(3, cfg.thickness + 1) if (level in ("high", "critical") or is_priority) else cfg.thickness
+        cv2.rectangle(out, p1, p2, color, box_thickness)
+        _draw_corners(out, p1, p2, color, length=16, thickness=box_thickness + 1)
+
+        # Highlight priority victim with outer hazard double-box
+        if is_priority and level in ("high", "critical"):
+            p1_outer = (max(0, p1[0] - 4), max(0, p1[1] - 4))
+            p2_outer = (min(w - 1, p2[0] + 4), min(h - 1, p2[1] + 4))
+            cv2.rectangle(out, p1_outer, p2_outer, (0, 0, 255), 2)
+
         short_id = tr.track_id.rsplit("-", 1)[-1]  # "cam_01-T7" -> "T7"
-        _label(out, f"{short_id} {tr.current.confidence:.2f}", p1, color)
+        conf_pct = int(round(tr.current.confidence * 100))
+        if risks is not None:
+            if is_priority and level in ("high", "critical"):
+                status_text = f"★ CRITICAL TARGET: {short_id} | DROWNING {risk_score:.2f} ({conf_pct}%)"
+            elif level in ("high", "critical"):
+                status_text = f"{short_id} | DROWNING DISTRESS {risk_score:.2f} ({conf_pct}%)"
+            elif level == "medium":
+                status_text = f"{short_id} | CAUTION {risk_score:.2f} ({conf_pct}%)"
+            else:
+                status_text = f"{short_id} | SWIMMING ({conf_pct}%)"
+        else:
+            status_text = f"{short_id} {tr.current.confidence:.2f}"
+        _label(out, status_text, p1, color)
     if cfg.show_hud:
-        parts = [camera_id or "", f"frame {frame_index}" if frame_index is not None else "",
-                 f"t={timestamp_s:.1f}s" if timestamp_s is not None else "", f"people={len(tracks)}",
-                 f"{fps:.1f} fps" if fps else ""]
-        text = "  ".join(p for p in parts if p)
+        if risks is not None:
+            safe_n = sum(1 for tr in tracks if risks.get(tr.track_id, ("low", 0))[0] == "low")
+            caution_n = sum(1 for tr in tracks if risks.get(tr.track_id, ("low", 0))[0] == "medium")
+            distress_n = sum(1 for tr in tracks if risks.get(tr.track_id, ("low", 0))[0] in ("high", "critical"))
+            parts = [
+                "OCEANEYE AI",
+                camera_id or "",
+                f"Swimmers: {len(tracks)}",
+                f"Safe: {safe_n} (Green)",
+                f"Caution: {caution_n} (Yellow)" if caution_n > 0 else "",
+                f"Distress: {distress_n} (Red)" if distress_n > 0 else "",
+                f"t={timestamp_s:.1f}s" if timestamp_s is not None else "",
+                f"{fps:.1f} fps" if fps else "",
+            ]
+        else:
+            parts = [camera_id or "", f"frame {frame_index}" if frame_index is not None else "",
+                     f"t={timestamp_s:.1f}s" if timestamp_s is not None else "", f"people={len(tracks)}",
+                     f"{fps:.1f} fps" if fps else ""]
+        text = "  ·  ".join(p for p in parts if p)
         (tw, _), _ = cv2.getTextSize(text, FONT, 0.5, 1)
-        cv2.rectangle(out, (0, 0), (min(w, tw + 12), 24), (0, 0, 0), -1)
-        cv2.putText(out, text, (6, 17), FONT, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.rectangle(out, (0, 0), (min(w, tw + 16), 26), (15, 20, 25), -1)
+        has_distress = bool(risks and any(risks.get(t.track_id, ("low", 0))[0] in ("high", "critical") for t in tracks))
+        has_caution = bool(risks and any(risks.get(t.track_id, ("low", 0))[0] == "medium" for t in tracks))
+        hud_accent = (30, 30, 240) if has_distress else ((0, 215, 255) if has_caution else ((50, 205, 50) if risks else (70, 70, 70)))
+        cv2.line(out, (0, 26), (min(w, tw + 16), 26), hud_accent, 2)
+        cv2.putText(out, text, (8, 18), FONT, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Prominent Emergency Alert Banner across the top if distress or elevated caution is detected
+        if priority_track_id and max_risk >= 0.35:
+            p_short = priority_track_id.rsplit("-", 1)[-1]
+            if max_risk >= 0.52:
+                alert_msg = f"CRITICAL: [Track {p_short}] DROWNING RISK {max_risk:.2f} - FLAGGED FOR REVIEW"
+                banner_col = (30, 30, 240)
+            else:
+                alert_msg = f"CAUTION: [Track {p_short}] STRUGGLE / BOBBING {max_risk:.2f} - MONITORING"
+                banner_col = (0, 215, 255)
+            (aw, _), _ = cv2.getTextSize(alert_msg, FONT, 0.48, 1)
+            cv2.rectangle(out, (0, 28), (min(w, aw + 16), 52), (15, 20, 25), -1)
+            cv2.line(out, (0, 52), (min(w, aw + 16), 52), banner_col, 2)
+            cv2.putText(out, alert_msg, (8, 45), FONT, 0.46, banner_col, 1, cv2.LINE_AA)
     return out
 
 

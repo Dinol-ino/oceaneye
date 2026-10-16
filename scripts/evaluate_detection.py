@@ -140,8 +140,10 @@ def evaluate_clip(path: Path, label: dict, cfg: PerceptionConfig, scoring: RiskS
                 continue
             inside = None
             if zone and w and h:
-                cx, cy = track.current.bbox.center
-                inside = _point_in_polygon(cx / w, cy / h, [(float(a), float(b)) for a, b in zone])
+                b = track.current.bbox
+                x = (b.x_min + b.x_max) / 2
+                y = b.y_max
+                inside = _point_in_polygon(x / w, y / h, [(float(a), float(b)) for a, b in zone])
             verdict = engine.assess(RiskInput(
                 camera_id=cfg.camera_id, track=track, behavior=assessment,
                 zone=_StubZone(inside), environment=_StubEnvironment(), now=frame.captured_at,

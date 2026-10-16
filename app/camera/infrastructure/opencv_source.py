@@ -168,13 +168,31 @@ class OpenCvFrameSource(FrameSource):
         """
         if self._cap is None:
             raise SourceOpenError("source is not open")
-        ok, image = self._cap.read()
+        cv2 = _import_cv2()
+        try:
+            ok, image = self._cap.read()
+        except cv2.error as exc:
+            if "Insufficient memory" in str(exc) or "OutOfMemory" in str(exc):
+                import gc
+                gc.collect()
+                try:
+                    ok, image = self._cap.read()
+                except cv2.error:
+                    return None
+            else:
+                raise
         if not ok or image is None:
             if not (self._info and self._info.is_live) or not self._reconnect():
                 return None
-            ok, image = self._cap.read()
+            try:
+                ok, image = self._cap.read()
+            except cv2.error:
+                return None
             if not ok or image is None:
                 return None
+        if image.shape[1] > 1920:
+            scale = 1920 / image.shape[1]
+            image = cv2.resize(image, (1920, int(image.shape[0] * scale)), interpolation=cv2.INTER_AREA)
         index = self._next_index
         self._next_index += 1
         for _ in range(self._stride - 1):  # grab() skips decoding work for the frames we drop

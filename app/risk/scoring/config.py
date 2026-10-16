@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 @dataclass(frozen=True)
 class RiskScoringConfig:
     # behaviour analysis window
-    window_seconds: float = 4.0
+    window_seconds: float = 6.0
     #: Minimum observations in a window. This is deliberately LOW and paired with
     #: ``min_sample_rate_hz`` below: as a bare count it silently meant 0.2 s of evidence at 30 fps
     #: and 2 s at 3 fps, so the same footage produced different verdicts on a faster machine.
@@ -28,7 +28,7 @@ class RiskScoringConfig:
     #: double-detection - and judging them produced alerts about people who were never there.
     #: MEASURED: at the previous tracker settings mean track life was 1.6 s, so virtually every
     #: assessment was being made on a fragment.
-    min_track_seconds: float = 2.5
+    min_track_seconds: float = 1.0
     #: A person smaller than this (bbox height in pixels) carries no usable signal: sub-pixel
     #: centre jitter swamps real motion, and pose keypoints are meaningless. On a 480x360 beach
     #: webcam a swimmer at the surf line is ~8 px, which is below ANY honest detection claim -
@@ -39,8 +39,8 @@ class RiskScoringConfig:
     still_motion: float = 0.25
     # vertical bobbing: >= `bob_min_reversals` up/down reversals of size >= `bob_amplitude` while
     # drifting less than `bob_max_drift` body-heights sideways
-    bob_amplitude: float = 0.05
-    bob_min_reversals: int = 4
+    bob_amplitude: float = 0.04
+    bob_min_reversals: int = 3
     bob_max_drift: float = 0.8
     # erratic movement: share of sharp (> `erratic_turn_deg`) direction changes while moving
     erratic_turn_deg: float = 70.0
@@ -54,8 +54,8 @@ class RiskScoringConfig:
     # indistinguishable from going under if all you watch is whether the box still exists. Counting
     # it made the highest-weighted signal fire on ordinary crowding. `gap_seconds` is kept only to
     # mark a history gap as "do not trust the measurements across this discontinuity".
-    gap_seconds: float = 0.4
-    shrink_ratio: float = 0.6
+    gap_seconds: float = 1.2
+    shrink_ratio: float = 0.72
     submersion_min_count: int = 2
 
     # -- pose signals (require a PoseEstimator; absent pose means the signal is simply not raised)

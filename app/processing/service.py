@@ -62,6 +62,7 @@ class JobOptions:
     imgsz: int | None = None
     device: str | None = None
     sensitivity: str | None = None
+    pose: bool | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -139,9 +140,10 @@ class ProcessingService:
         target_fps = float(d.target_fps or 0)
         if target_fps and not (0 < target_fps <= MAX_TARGET_FPS):
             raise DomainValidationError(f"target_fps must be 0 (auto) or between 0 and {MAX_TARGET_FPS:g}")
+        pose = bool(opts.pose) if opts.pose is not None else False
         return {"model": model, "imgsz": imgsz, "device": device, "sensitivity": sensitivity,
                 "target_fps": target_fps, "clip_max_width": int(d.clip_max_width or 0),
-                "workers_sharing": max(1, int(d.max_workers or 1))}
+                "workers_sharing": max(1, int(d.max_workers or 1)), "pose": pose}
 
     # -- analysis jobs -------------------------------------------------------
     def create_job(self, upload_id: str, camera_id: str, opts: JobOptions | None = None) -> AnalysisJob:
@@ -245,9 +247,13 @@ class ProcessingService:
         if status in (JobStatus.COMPLETED, JobStatus.FAILED):
             job.finished_at = now
             if status is JobStatus.COMPLETED:
-                job.progress = 1.0
-                if (self.job_dir(job.id) / "overlay.mp4").is_file():
-                    job.overlay_key = "overlay.mp4"
+                if summary and summary.get("frames_processed", 0) == 0:
+                    job.status = JobStatus.FAILED
+                    job.error = "No frames were processed (0 frames decoded). Try running with yolov8n.pt or CPU mode."
+                else:
+                    job.progress = 1.0
+                    if (self.job_dir(job.id) / "overlay.mp4").is_file():
+                        job.overlay_key = "overlay.mp4"
         self._jobs.save(job)
         return job
 

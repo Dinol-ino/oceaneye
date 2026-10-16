@@ -47,7 +47,7 @@ class TrackerConfig:
     #: Seconds a lost track is remembered before its identity is retired. Expressed in SECONDS, not
     #: frames: the old frame count meant 1 s at 30 fps but 10 s at 3 fps, so the tracker behaved
     #: like a different algorithm depending on how fast the machine happened to be.
-    track_buffer_seconds: float = 2.5
+    track_buffer_seconds: float = 4.0
     match_thresh: float = 0.8
     history_len: int = 300  # detections kept per track; must cover the longest behaviour window
 

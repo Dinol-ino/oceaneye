@@ -109,8 +109,10 @@ class YoloDetector(Detector):
             }
             if self._half:
                 keyword = half_precision_keyword()
-                if keyword:
-                    kwargs[keyword] = True
+                if keyword == "quantize":
+                    kwargs["quantize"] = "fp16"
+                elif keyword == "half":
+                    kwargs["half"] = True
                 else:
                     logger.debug("installed ultralytics exposes no fp16 flag; running fp32")
             self._predict_kwargs = kwargs

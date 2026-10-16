@@ -127,8 +127,8 @@
       <label>Video<select id="aUpload"></select></label>
       <label>Camera<select id="aCam"></select></label>
       <label>Model<select id="aModel">
+        <option value="yolov8n.pt" selected>yolov8n — fast & safe (Recommended)</option>
         <option value="auto">auto — fit this machine</option>
-        <option value="yolov8n.pt">yolov8n — fastest</option>
         <option value="yolov8s.pt">yolov8s — balanced</option>
         <option value="yolov8m.pt">yolov8m — accurate (GPU)</option>
         <option value="yolo11s.pt">yolo11s — newer</option>
@@ -249,8 +249,11 @@
 
 <div class="modal" id="vidModal"><div class="box">
   <h2 id="vidTitle">Annotated result</h2>
-  <video id="vid" controls autoplay muted playsinline></video>
-  <div class="btns" style="margin-top:8px"><button class="ghost" onclick="closeModal('vidModal')">Close</button></div>
+  <video id="vid" controls autoplay muted playsinline style="max-height:65vh;width:100%"></video>
+  <div class="btns" style="margin-top:10px;display:flex;align-items:center;gap:10px">
+    <a id="vidDl" class="pill" download="oceaneye_annotated.mp4" target="_blank" style="text-decoration:none">📥 Download Video</a>
+    <button class="ghost" onclick="closeModal('vidModal')">Close</button>
+  </div>
 </div></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

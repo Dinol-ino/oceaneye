@@ -70,7 +70,7 @@ def test_the_fp16_keyword_is_resolved_once_not_per_frame(monkeypatch):
     for _ in range(5):
         det.detect(FRAME)
     assert len(resolutions) == 1
-    assert all(call["quantize"] is True for call in model.calls)
+    assert all(call["quantize"] in (True, "fp16") for call in model.calls)
 
 
 def test_half_precision_uses_the_keyword_the_installed_ultralytics_accepts(monkeypatch):
@@ -79,7 +79,7 @@ def test_half_precision_uses_the_keyword_the_installed_ultralytics_accepts(monke
     model = FakeModel(_Boxes([[1, 2, 3, 4]], [0.5], [0]))
     YoloDetector(DetectorConfig(device="cuda:0"), model=model).detect(FRAME)
     keyword = half_precision_keyword()
-    assert keyword is None or model.calls[0][keyword] is True
+    assert keyword is None or model.calls[0][keyword] in (True, "fp16")
 
 
 def test_requested_cuda_falls_back_to_cpu_when_unavailable(monkeypatch):

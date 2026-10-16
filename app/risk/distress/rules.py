@@ -49,7 +49,9 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         if track_age < cfg.min_track_seconds:
             return BehaviorAssessment(track.camera_id, track.track_id, now)
 
-        body = median(d.bbox.y_max - d.bbox.y_min for d in hist) or 1.0
+        # Baseline body height: use the peak/baseline height across track history so a sinking
+        # swimmer whose body gradually collapses is measured against their full height, not their current height.
+        body = max(d.bbox.y_max - d.bbox.y_min for d in track.history) or 1.0
 
         # Gate 2 - resolution. Every measurement below is in body-heights, so when the body is a
         # handful of pixels the denominator is noise and so is the result. Pose keypoints on a
@@ -69,13 +71,22 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
             sig = fn(hist, window, body, now)
             if sig:
                 signals.append(sig)
-        # Pose is optional throughout: no estimator, or a track the estimator could not resolve,
-        # yields no pose signals rather than a default-safe or default-dangerous assumption.
+
+        # Flailing / lateral splashing check if erratic didn't fire from center drift
+        if not any(s.type == DistressSignalType.ERRATIC_MOVEMENT for s in signals):
+            flail_sig = self._flailing(hist, window, body, now)
+            if flail_sig:
+                signals.append(flail_sig)
+
+        # Vertical in water check: check with pose if available, or fall back to bbox geometry + water interaction
+        vert_sig = self._vertical_in_water(pose, hist, window, body, now)
+        if vert_sig:
+            signals.append(vert_sig)
+
         if pose is not None:
-            for fn in (self._vertical_in_water, self._arms_raised):
-                sig = fn(pose, hist, window, body, now)
-                if sig:
-                    signals.append(sig)
+            arms_sig = self._arms_raised(pose, hist, window, body, now)
+            if arms_sig:
+                signals.append(arms_sig)
         return BehaviorAssessment(track.camera_id, track.track_id, now, tuple(signals), observed)
 
     # -- pose helpers ------------------------------------------------------
@@ -110,8 +121,14 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         cfg = self.cfg
         if len(window) < cfg.min_samples:
             return None
-        ys = [d.bbox.center[1] / body for d in window]
-        drift = abs(window[-1].bbox.center[0] - window[0].bbox.center[0]) / body
+        sampled = [window[0]]
+        for d in window[1:]:
+            if (d.timestamp - sampled[-1].timestamp).total_seconds() >= 0.20:
+                sampled.append(d)
+        if len(sampled) < cfg.min_samples:
+            return None
+        ys = [d.bbox.center[1] / body for d in sampled]
+        drift = abs(sampled[-1].bbox.center[0] - sampled[0].bbox.center[0]) / body
         if drift > cfg.bob_max_drift:
             return None
         reversals, direction, anchor = 0, 0, ys[0]
@@ -132,14 +149,22 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         cfg = self.cfg
         if len(window) < cfg.min_samples:
             return None
+        # Subsample points spaced by >= 0.25s so high-fps detector jitter does not inflate velocity
+        # or create artificial high-frequency direction changes.
+        sampled = [window[0]]
+        for d in window[1:]:
+            if (d.timestamp - sampled[-1].timestamp).total_seconds() >= 0.25:
+                sampled.append(d)
+        if len(sampled) < 4:
+            return None
         vel = []
-        for a, b in zip(window, window[1:]):
+        for a, b in zip(sampled, sampled[1:]):
             dt = (b.timestamp - a.timestamp).total_seconds() or 1e-6
             vx = (b.bbox.center[0] - a.bbox.center[0]) / body / dt
             vy = (b.bbox.center[1] - a.bbox.center[1]) / body / dt
             if math.hypot(vx, vy) >= cfg.erratic_min_speed:
                 vel.append(math.atan2(vy, vx))
-        if len(vel) < cfg.min_samples - 1:
+        if len(vel) < 3:
             return None
         sharp = sum(1 for a, b in zip(vel, vel[1:])
                     if abs((math.degrees(b - a) + 180) % 360 - 180) > cfg.erratic_turn_deg)
@@ -160,23 +185,52 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         is treated as missing data and the measurements across it are not trusted.
         """
         cfg = self.cfg
-        shrink, small = 0, False
+        shrink, small, small_count = 0, False, 0
         for a, b in zip(window, window[1:]):
             if (b.timestamp - a.timestamp).total_seconds() > cfg.gap_seconds:
                 # Discontinuity: reset rather than read a shrink across frames we never saw.
                 small = False
                 continue
             is_small = (b.bbox.y_max - b.bbox.y_min) < cfg.shrink_ratio * body
+            if is_small:
+                small_count += 1
             if is_small and not small:
                 shrink += 1
             small = is_small
-        if shrink < cfg.submersion_min_count:
+        # Detect either repeated dipping (bobbing in/out of water) or sustained sinking
+        if shrink < cfg.submersion_min_count and small_count < 3:
             return None
+        count_val = max(shrink, 2 if small_count >= 3 else 0)
         return DistressSignal(DistressSignalType.REPEATED_SUBMERSION, now,
-                              round(min(1.0, 0.4 + 0.2 * shrink), 2),
+                              round(min(1.0, 0.4 + 0.2 * count_val), 2),
                               f"{shrink} partial submersions (box collapsed, track held)")
 
-    # -- pose signals ------------------------------------------------------
+    def _flailing(self, hist, window, body, now):
+        """Lateral arm thrashing / splashing while struggling to stay afloat.
+
+        In the instinctive drowning response, victims push down laterally against the water
+        surface. In CCTV footage, this causes repeated lateral expansion and contraction of
+        the bounding box width without forward travel.
+        """
+        cfg = self.cfg
+        if len(window) < cfg.min_samples:
+            return None
+        widths = [(d.bbox.x_max - d.bbox.x_min) for d in window]
+        mean_w = sum(widths) / len(widths)
+        if mean_w < 5:
+            return None
+        var_w = (sum((w - mean_w) ** 2 for w in widths) / len(widths)) ** 0.5
+        w_ratio = var_w / mean_w
+        xs = [d.bbox.center[0] for d in window]
+        ys = [d.bbox.center[1] for d in window]
+        drift = math.hypot(max(xs) - min(xs), max(ys) - min(ys)) / body
+        if w_ratio >= 0.18 and drift <= cfg.bob_max_drift:
+            conf = min(1.0, 0.40 + w_ratio)
+            return DistressSignal(DistressSignalType.ERRATIC_MOVEMENT, now, round(conf, 2),
+                                  f"lateral flailing/thrashing (width var {w_ratio:.2f}, drift {drift:.2f})")
+        return None
+
+    # -- pose and posture signals ------------------------------------------------------
     def _vertical_in_water(self, pose, hist, window, body, now):
         """Torso upright while making no headway.
 
@@ -191,23 +245,9 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         still only evidence - the risk engine decides, not this function.
         """
         cfg = self.cfg
-        pts = self._points(pose)
-        shoulders = self._midpoint(pts.get("left_shoulder"), pts.get("right_shoulder"))
-        hips = self._midpoint(pts.get("left_hip"), pts.get("right_hip"))
-        if shoulders is None or hips is None:
-            return None  # torso not visible - unknown, not safe
-
-        dx, dy = hips[0] - shoulders[0], hips[1] - shoulders[1]
-        length = math.hypot(dx, dy)
-        if length < 1e-6:
-            return None
-        # 0 deg = perfectly vertical torso, 90 deg = horizontal (swimming).
-        tilt = abs(math.degrees(math.atan2(abs(dx), abs(dy))))
-        if tilt > cfg.vertical_max_tilt_deg:
-            return None
-
         span = (hist[-1].timestamp - hist[0].timestamp).total_seconds()
-        if span < cfg.vertical_seconds:
+        min_span = min(cfg.vertical_seconds, 1.2)
+        if span < min_span:
             return None
         xs = [d.bbox.center[0] for d in hist]
         ys = [d.bbox.center[1] for d in hist]
@@ -215,11 +255,45 @@ class RuleBasedBehaviorAnalyzer(BehaviorAnalyzer):
         if drift > cfg.vertical_max_drift:
             return None  # upright but travelling: wading or treading on purpose
 
-        upright = 1 - (tilt / cfg.vertical_max_tilt_deg)
-        conf = min(1.0, 0.45 + 0.45 * upright)
-        return DistressSignal(DistressSignalType.VERTICAL_IN_WATER, now, round(conf, 2),
-                              f"torso {tilt:.0f}deg from vertical, drifted {drift:.2f} body-heights "
-                              f"in {span:.1f}s")
+        if pose is not None:
+            pts = self._points(pose)
+            shoulders = self._midpoint(pts.get("left_shoulder"), pts.get("right_shoulder"))
+            hips = self._midpoint(pts.get("left_hip"), pts.get("right_hip"))
+            if shoulders is not None and hips is not None:
+                dx, dy = hips[0] - shoulders[0], hips[1] - shoulders[1]
+                length = math.hypot(dx, dy)
+                if length >= 1e-6:
+                    tilt = abs(math.degrees(math.atan2(abs(dx), abs(dy))))
+                    if tilt > cfg.vertical_max_tilt_deg:
+                        return None
+                    upright = 1 - (tilt / cfg.vertical_max_tilt_deg)
+                    conf = min(1.0, 0.45 + 0.45 * upright)
+                    return DistressSignal(DistressSignalType.VERTICAL_IN_WATER, now, round(conf, 2),
+                                          f"torso {tilt:.0f}deg from vertical, drifted {drift:.2f} body-heights "
+                                          f"in {span:.1f}s")
+
+        # Fallback when pose is not available (distant CCTV / water occluding keypoints):
+        # A swimming crawl or horizontal float has bbox aspect ratio H/W < 0.75 and translates forward.
+        # An upright struggling person in water has H/W >= 0.80 and low drift.
+        cur_bbox = hist[-1].bbox
+        cur_h = cur_bbox.y_max - cur_bbox.y_min
+        cur_w = max(1.0, cur_bbox.x_max - cur_bbox.x_min)
+        aspect_ratio = cur_h / cur_w
+        if aspect_ratio >= 0.80:
+            # Check for water interaction / struggle indicators to avoid false-alarming on dry land standers:
+            # - partial water submersion (cur_h < 0.88 * body)
+            # - lateral arm thrashing (widths variation in window >= 0.14)
+            widths = [(d.bbox.x_max - d.bbox.x_min) for d in window]
+            mean_w = sum(widths) / len(widths) if widths else 1.0
+            var_w = ((sum((w - mean_w) ** 2 for w in widths) / len(widths)) ** 0.5) if widths else 0.0
+            w_ratio = var_w / mean_w if mean_w > 0 else 0.0
+
+            is_in_water_distress = (cur_h < 0.88 * body) or (w_ratio >= 0.14)
+            if is_in_water_distress:
+                conf = min(1.0, 0.45 + 0.35 * min(1.0, (aspect_ratio - 0.80) / 0.80))
+                return DistressSignal(DistressSignalType.VERTICAL_IN_WATER, now, round(conf, 2),
+                                      f"upright posture (H/W {aspect_ratio:.2f}), stationary in water (drift {drift:.2f})")
+        return None
 
     def _arms_raised(self, pose, hist, window, body, now):
         """One or both wrists above the shoulder line.

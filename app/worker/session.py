@@ -88,6 +88,7 @@ class SessionConfig:
     push_fps: float = 2.0
     max_frames: int | None = None
     workers_sharing: int = 1  # how many workers the API expects to run at once
+    pose: bool = False
 
     @classmethod
     def from_worker_config(cls, mode: str, cfg: dict, **extra) -> "SessionConfig":
@@ -98,7 +99,7 @@ class SessionConfig:
                    imgsz=int(opt.get("imgsz", 0) or 0), device=opt.get("device", "auto"),
                    target_fps=float(opt.get("target_fps", 0) or 0), sensitivity=opt.get("sensitivity", "medium"),
                    workers_sharing=int(opt.get("workers_sharing", 1) or 1), job_id=cfg.get("job_id"),
-                   output_dir=cfg.get("output_dir"), **extra)
+                   output_dir=cfg.get("output_dir"), pose=bool(opt.get("pose", False)), **extra)
 
 
 PipelineFactory = Callable[["SessionConfig", float], VisionPipeline]
@@ -123,10 +124,12 @@ def default_pipeline(cfg: SessionConfig, fps: float) -> VisionPipeline:
     """Built from the *already resolved* cfg (see :meth:`MonitoringSession._prepare`)."""
     from app.vision.detection.yolo import YoloDetector
     from app.vision.pipeline.default import DefaultVisionPipeline
+    from app.vision.pose.yolo_pose import PoseConfig, YoloPoseEstimator
     from app.vision.tracking.bytetrack import ByteTrackTracker
 
     det = DetectorConfig(model=cfg.model, weights_dir=cfg.weights_dir, device=cfg.device, imgsz=cfg.imgsz)
-    return DefaultVisionPipeline(YoloDetector(det), ByteTrackTracker(TrackerConfig(), frame_rate=fps))
+    pose = YoloPoseEstimator(PoseConfig(weights_dir=cfg.weights_dir, device=cfg.device, enabled=True)) if getattr(cfg, "pose", False) else None
+    return DefaultVisionPipeline(YoloDetector(det), ByteTrackTracker(TrackerConfig(), frame_rate=fps), pose)
 
 
 @dataclass
@@ -214,10 +217,11 @@ class MonitoringSession:
         except Exception as exc:  # noqa: BLE001 - an event without a clip is still an event
             logger.warning("clip not written: %s", exc)
             clip_key = None
+        event_time = datetime.now(timezone.utc) if self.cfg.mode == "job" else started_at
         payload = {
             "camera_id": self.cfg.camera_id, "track_id": a.track_id[:64], "risk_score": a.risk_score,
             "risk_level": a.risk_level.value if a.risk_level else None,
-            "started_at": started_at.isoformat(), "distress_signals": [s.value for s in a.contributing_signals],
+            "started_at": event_time.isoformat(), "distress_signals": [s.value for s in a.contributing_signals],
             "reason": (f"[{self.cfg.mode}] {a.reason}")[:500],
             "evidence": {"thumbnail_key": thumb_key, **({"clip_key": clip_key} if clip_key else {})},
             "location": {"lat": self.cfg.lat, "lon": self.cfg.lon, "zone_name": self.cfg.zone_name},
@@ -324,7 +328,8 @@ class MonitoringSession:
 
                 annotated = draw_tracks(frame.image, result.tracks, overlay_cfg, frame_index=frame.index,
                                         timestamp_s=frame.index / info.fps, camera_id=cfg.camera_name,
-                                        fps=self.stats.frames / self.stats.pipeline_time)
+                                        fps=self.stats.frames / self.stats.pipeline_time,
+                                        risks=risks)
                 draw_zone(annotated, cfg.zone_polygon, cfg.zone_name)
                 draw_risk(annotated, result.tracks, risks)
                 # Clip frames are stored small; the event thumbnail still uses `annotated` at full size.

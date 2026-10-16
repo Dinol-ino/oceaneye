@@ -47,6 +47,12 @@ def main(argv: list[str] | None = None) -> int:
             cfg = SessionConfig.from_worker_config("job", client.get(f"/processing/jobs/{args.job_id}/worker-config"))
             client.post(f"/processing/jobs/{args.job_id}/report", {"status": "running", "progress": 0.0})
             summary = MonitoringSession(cfg, client, evidence).run()
+            if summary.get("frames_processed", 0) == 0:
+                client.post(f"/processing/jobs/{args.job_id}/report",
+                            {"status": "failed", "summary": summary,
+                             "error": "No frames could be decoded from this video. Try with yolov8n or CPU mode."})
+                logger.warning("job finished with 0 frames processed: %s", summary)
+                return 1
             client.post(f"/processing/jobs/{args.job_id}/report",
                         {"status": "completed", "summary": summary, "events_created": summary["events_created"]})
             logger.info("job done: %s", summary)

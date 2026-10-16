@@ -39,6 +39,11 @@ class DefaultAlertService(AlertService):
 
     async def on_event_created(self, e: EventCreated) -> None:
         now = self._clock.now()
+        for existing in self._alerts.list(active_only=True, limit=50):
+            ev = self._events.get(existing.event_id)
+            if ev and ev.camera_id == e.event.camera_id and ev.track_id == e.event.track_id:
+                logger.info("alert coalesced for active track %s on camera %s", e.event.track_id, e.event.camera_id)
+                return
         alert = Alert(id=new_id("alt"), event_id=e.event.id, created_at=now, ack_deadline=now + self._ack_timeout)
         self._alerts.save(alert)
         logger.info("alert created", extra={"alert_id": alert.id, "event_id": e.event.id})

@@ -64,16 +64,17 @@ def choose_profile(device: str, *, vram_gb: float | None = None, ram_gb: float |
 
     if cuda:
         budget = (vram_gb or 4.0) / share
-        if budget >= 6.0:
+        tight_ram = ram_gb is not None and ram_gb < 8.0
+        if budget >= 6.0 and not tight_ram:
             auto_model, auto_imgsz, auto_fps = "yolov8s.pt", 960, 8.0
-        elif budget >= 3.0:
+        elif budget >= 3.0 and not tight_ram:
             # 4 GB laptop GPU with one worker: 768 px keeps small swimmers visible without the OOM.
             auto_model, auto_imgsz, auto_fps = "yolov8s.pt", 768, 6.0
         elif budget >= 1.5:
             auto_model, auto_imgsz, auto_fps = "yolov8n.pt", 640, 6.0
         else:
             auto_model, auto_imgsz, auto_fps = "yolov8n.pt", 512, 4.0
-        why = f"cuda, {budget:.1f} GB VRAM per worker"
+        why = f"cuda, {budget:.1f} GB VRAM per worker" + (", tight RAM" if tight_ram else "")
     elif mps:
         auto_model, auto_imgsz, auto_fps = "yolov8n.pt", 640, 5.0
         why = "apple gpu (mps)"

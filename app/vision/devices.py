@@ -32,21 +32,16 @@ def resolve_device(requested: str = "auto") -> str:
 def _cuda_available() -> bool:
     try:
         import torch  # noqa: PLC0415
-    except ImportError:
-        return False
-    try:
         return bool(torch.cuda.is_available())
-    except Exception:  # noqa: BLE001 - a broken driver must not crash the worker
+    except Exception as exc:  # noqa: BLE001 - DLL load errors or low paging file fall back to CPU
+        logger.warning("CUDA is not available (%s); falling back to CPU", exc)
         return False
 
 
 def _mps_available() -> bool:
     try:
         import torch  # noqa: PLC0415
-    except ImportError:
-        return False
-    mps = getattr(getattr(torch, "backends", None), "mps", None)
-    try:
+        mps = getattr(getattr(torch, "backends", None), "mps", None)
         return bool(mps is not None and mps.is_available())
     except Exception:  # noqa: BLE001
         return False
